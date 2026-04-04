@@ -1,0 +1,53 @@
+{
+  "version": "1.0",
+  "created": "2026-04-04T14:58:19.601042",
+  "notes": "",
+  "resistors": {
+    "r1": {
+      "value": 8.2,
+      "unit": "k\u03a9",
+      "rating_mw": 200.0,
+      "tolerance_pct": 1.0
+    },
+    "r2": {
+      "value": 29.0,
+      "unit": "k\u03a9",
+      "rating_mw": 63.0,
+      "tolerance_pct": 1.0
+    },
+    "r_series": {
+      "value": 0.0,
+      "unit": "\u03a9",
+      "rating_mw": null,
+      "tolerance_pct": null
+    }
+  },
+  "zener": {
+    "preset": "BZB984-C3V3",
+    "vz_nom": 3.3,
+    "vz_min": 3.1,
+    "vz_max": 3.5,
+    "tolerance_pct": 5,
+    "izt_ma": 5.0,
+    "zzt_typ": 85.0,
+    "zzt_max": 95.0,
+    "zzk_typ": 350.0,
+    "zzk_max": 600.0,
+    "izk_ma": 1.0,
+    "ptot_mw": 265.0
+  },
+  "mcu": {
+    "vdd": 3.3,
+    "vdda": 3.3,
+    "vref": 3.3,
+    "v_recommended_max": 3.6,
+    "v_absolute_max": 4.0,
+    "safe_injection_ma": 2.0
+  },
+  "system": {
+    "v_input_max": 30.0,
+    "v_analog_fullscale": 4.1,
+    "v_logic_high_min": 3.0,
+    "v_logic_low_max": 1.0
+  }
+}
