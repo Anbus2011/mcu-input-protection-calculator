@@ -5,6 +5,10 @@ Wires everything together through the AppState controller.
 """
 from __future__ import annotations
 
+import os
+import sys
+import tempfile
+
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageDraw, ImageTk
@@ -55,122 +59,84 @@ class MainWindow(ctk.CTk):
     def _set_icon(self):
         """Draw a resistor zigzag icon and set it as the window icon."""
         try:
-            size = 64
-            img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(img)
+            # Build the resistor image at multiple sizes for crisp display
+            sizes = [16, 32, 48, 64, 256]
+            images = []
+            for size in sizes:
+                img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+                draw = ImageDraw.Draw(img)
+                s = size / 64.0  # scale factor
 
-            # Blue rounded-rect background
-            draw.rounded_rectangle([0, 0, 63, 63], radius=8, fill=(43, 94, 167))
+                # Blue rounded-rect background
+                r = max(1, int(8 * s))
+                draw.rounded_rectangle([0, 0, size - 1, size - 1], radius=r,
+                                       fill=(43, 94, 167))
 
-            # Resistor zigzag path: lead-in, 4 zigzag peaks, lead-out
-            points = [
-                (8, 32), (16, 32),
-                (18, 24), (22, 40), (26, 24), (30, 40),
-                (34, 24), (38, 40), (42, 24), (46, 40),
-                (48, 32), (56, 32),
-            ]
-            draw.line(points, fill="white", width=3, joint="curve")
+                # Resistor zigzag path scaled
+                points = [
+                    (8, 32), (16, 32),
+                    (18, 24), (22, 40), (26, 24), (30, 40),
+                    (34, 24), (38, 40), (42, 24), (46, 40),
+                    (48, 32), (56, 32),
+                ]
+                scaled = [(x * s, y * s) for x, y in points]
+                w = max(1, int(3 * s))
+                draw.line(scaled, fill="white", width=w, joint="curve")
 
-            # Terminal dots
-            draw.ellipse([5, 29, 11, 35], fill="white")
-            draw.ellipse([53, 29, 59, 35], fill="white")
+                # Terminal dots
+                dr = max(1, 3 * s)
+                cx1, cx2, cy = 8 * s, 56 * s, 32 * s
+                draw.ellipse([cx1 - dr, cy - dr, cx1 + dr, cy + dr], fill="white")
+                draw.ellipse([cx2 - dr, cy - dr, cx2 + dr, cy + dr], fill="white")
+                images.append(img)
 
-            self._icon_photo = ImageTk.PhotoImage(img)
+            # Save as .ico for Windows taskbar support
+            ico_path = os.path.join(tempfile.gettempdir(), "mcu_calc_icon.ico")
+            images[-1].save(ico_path, format="ICO",
+                            sizes=[(s, s) for s in sizes],
+                            append_images=images[:-1])
+            self.iconbitmap(ico_path)
+
+            # Also set iconphoto for title bar
+            self._icon_photo = ImageTk.PhotoImage(images[3])  # 64px
             self.iconphoto(False, self._icon_photo)
         except Exception:
             pass
 
-    # ── Menu ──────────────────────────────────────────────────────────────
+    # ── Toolbar ────────────────────────────────────────────────────────────
 
     def _create_menu(self):
-        self.menu_frame = ctk.CTkFrame(self, height=30, corner_radius=0)
-        self.menu_frame.pack(fill="x", side="top")
-        self.menu_frame.pack_propagate(False)
+        self.toolbar = ctk.CTkFrame(self, height=36, corner_radius=0)
+        self.toolbar.pack(fill="x", side="top")
+        self.toolbar.pack_propagate(False)
 
-        self.file_btn = ctk.CTkButton(
-            self.menu_frame, text="File \u25bc", width=60, height=24,
-            command=self._toggle_file_menu, fg_color="transparent",
-            hover_color=("gray70", "gray30")
-        )
-        self.file_btn.pack(side="left", padx=5, pady=3)
+        btn_style = {"height": 28, "corner_radius": 6,
+                     "fg_color": "#2B5EA7", "hover_color": "#1E4A8A"}
 
-        self.load_btn = ctk.CTkButton(
-            self.menu_frame, text="Load Design...", width=110, height=24,
-            command=self._file_open,
-            fg_color="#2B5EA7", hover_color="#1E4A8A"
-        )
-        self.load_btn.pack(side="left", padx=5, pady=3)
+        ctk.CTkButton(
+            self.toolbar, text="New Design", width=100,
+            command=self._file_new, **btn_style
+        ).pack(side="left", padx=(8, 4), pady=4)
 
-        self._file_menu = None
-        self._menu_open = False
+        ctk.CTkButton(
+            self.toolbar, text="Load Design...", width=120,
+            command=self._file_open, **btn_style
+        ).pack(side="left", padx=4, pady=4)
 
+        ctk.CTkButton(
+            self.toolbar, text="Save Design", width=110,
+            command=self._file_save, **btn_style
+        ).pack(side="left", padx=4, pady=4)
+
+        ctk.CTkButton(
+            self.toolbar, text="Save Design As...", width=130,
+            command=self._file_save_as, **btn_style
+        ).pack(side="left", padx=4, pady=4)
+
+        self.bind("<Control-n>", lambda e: self._file_new())
         self.bind("<Control-o>", lambda e: self._file_open())
         self.bind("<Control-s>", lambda e: self._file_save())
         self.bind("<Control-S>", lambda e: self._file_save_as())
-
-    def _toggle_file_menu(self):
-        if self._menu_open:
-            self._close_file_menu()
-        else:
-            self._open_file_menu()
-
-    def _open_file_menu(self):
-        if self._file_menu is not None:
-            self._close_file_menu()
-            return
-
-        self._menu_open = True
-        self._file_menu = ctk.CTkFrame(self, corner_radius=5, border_width=1, border_color="gray50")
-        self._file_menu.place(x=5, y=33)
-
-        items = [
-            ("New", "Ctrl+N", self._file_new),
-            ("Open...", "Ctrl+O", self._file_open),
-            ("Save", "Ctrl+S", self._file_save),
-            ("Save As...", "Ctrl+Shift+S", self._file_save_as),
-        ]
-
-        for label, shortcut, command in items:
-            item_frame = ctk.CTkFrame(self._file_menu, fg_color="transparent")
-            item_frame.pack(fill="x", padx=2, pady=1)
-            ctk.CTkButton(
-                item_frame, text=label, width=100, height=26, anchor="w",
-                fg_color="transparent", hover_color=("gray70", "gray30"),
-                command=lambda c=command: self._menu_action(c)
-            ).pack(side="left")
-            ctk.CTkLabel(item_frame, text=shortcut, width=80,
-                         text_color="gray50", font=("", 12)).pack(side="right", padx=5)
-
-        self.bind("<Button-1>", self._check_menu_click)
-
-    def _check_menu_click(self, event):
-        if self._file_menu is None:
-            return
-        mx = self._file_menu.winfo_rootx()
-        my = self._file_menu.winfo_rooty()
-        mw = self._file_menu.winfo_width()
-        mh = self._file_menu.winfo_height()
-        bx = self.file_btn.winfo_rootx()
-        by = self.file_btn.winfo_rooty()
-        bw = self.file_btn.winfo_width()
-        bh = self.file_btn.winfo_height()
-        cx, cy = event.x_root, event.y_root
-        in_menu = mx <= cx <= mx + mw and my <= cy <= my + mh
-        in_btn = bx <= cx <= bx + bw and by <= cy <= by + bh
-        if not in_menu and not in_btn:
-            self._close_file_menu()
-
-    def _close_file_menu(self):
-        self._menu_open = False
-        self.unbind("<Button-1>")
-        if self._file_menu is not None:
-            self._file_menu.destroy()
-            self._file_menu = None
-
-    def _menu_action(self, command):
-        self._close_file_menu()
-        if command:
-            self.after(10, command)
 
     # ── File operations ───────────────────────────────────────────────────
 
@@ -324,6 +290,10 @@ class MainWindow(ctk.CTk):
         self.safety_tab.refresh(result, self.app_state.mcu.safe_injection_ma)
         self.operating_tab.refresh(result)
         self.plot.refresh(result)
+        # Auto-update bandwidth tab with values from other panels
+        self.bw_input_panel.refresh_auto_values()
+        self.bw_input_panel.push_to_state()
+        self.app_state.recalculate_bandwidth()
 
     def _on_bandwidth_changed(self, result: BandwidthResult):
         self.bandwidth_tab.refresh(result)

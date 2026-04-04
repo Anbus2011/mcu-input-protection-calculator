@@ -469,10 +469,65 @@ class NotesPanel(ctk.CTkFrame):
         self.app_state.mark_dirty()
 
 
+# ── Tooltip Helper ────────────────────────────────────────────────────────────
+
+class _Tooltip:
+    """Popup tooltip that appears near a widget on hover or click."""
+
+    def __init__(self, widget: ctk.CTkBaseClass, text: str):
+        self.widget = widget
+        self.text = text
+        self._tw = None
+        widget.bind("<Enter>", self._show)
+        widget.bind("<Leave>", self._hide)
+        widget.bind("<Button-1>", self._toggle)
+
+    def _show(self, event=None):
+        if self._tw:
+            return
+        x = self.widget.winfo_rootx() + self.widget.winfo_width() + 5
+        y = self.widget.winfo_rooty()
+        self._tw = tw = ctk.CTkToplevel()
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        tw.attributes("-topmost", True)
+        frame = ctk.CTkFrame(tw, corner_radius=6, border_width=1,
+                             border_color="gray50", fg_color=("gray90", "gray20"))
+        frame.pack()
+        ctk.CTkLabel(frame, text=self.text, wraplength=300, justify="left",
+                     font=("", 12), padx=8, pady=6).pack()
+
+    def _hide(self, event=None):
+        if self._tw:
+            self._tw.destroy()
+            self._tw = None
+
+    def _toggle(self, event=None):
+        if self._tw:
+            self._hide()
+        else:
+            self._show()
+
+
+def _help_btn(parent, text: str):
+    """Create a small '?' button with a tooltip."""
+    btn = ctk.CTkLabel(parent, text="?", width=18, height=18,
+                       fg_color=("gray75", "gray35"), corner_radius=9,
+                       font=("", 11, "bold"), text_color=("gray30", "gray80"),
+                       cursor="hand2")
+    btn.pack(side="left", padx=(4, 0))
+    _Tooltip(btn, text)
+    return btn
+
+
 # ── Bandwidth / PPS Input Panel ───────────────────────────────────────────────
 
 class BandwidthInputPanel(ctk.CTkFrame):
-    """Input fields for the Signal Bandwidth / PPS analysis tab."""
+    """Input fields for the Signal Bandwidth / PPS analysis tab.
+
+    R_series, VIL, VIH, and V_high are auto-pulled from the other panels
+    via AppState. Only bandwidth-specific inputs are shown here.
+    """
 
     def __init__(self, parent, state: AppState):
         super().__init__(parent, fg_color="transparent")
@@ -480,92 +535,130 @@ class BandwidthInputPanel(ctk.CTkFrame):
         self._build()
 
     def _build(self):
-        # Protection network
-        ctk.CTkLabel(self, text="Protection Network", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(5, 2))
-        net = ctk.CTkFrame(self, fg_color="transparent"); net.pack(fill="x", padx=5)
+        # Auto-derived values (read-only display)
+        ctk.CTkLabel(self, text="From Other Panels", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(5, 2))
+        auto = ctk.CTkFrame(self, fg_color="transparent"); auto.pack(fill="x", padx=5)
 
-        r1 = ctk.CTkFrame(net, fg_color="transparent"); r1.pack(fill="x", pady=1)
-        ctk.CTkLabel(r1, text="R_series:", width=90).pack(side="left")
-        self.r_series = ctk.CTkEntry(r1, width=70); self.r_series.pack(side="left", padx=2)
-        self.r_series.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(r1, text="\u03a9").pack(side="left")
+        a1 = ctk.CTkFrame(auto, fg_color="transparent"); a1.pack(fill="x", pady=1)
+        ctk.CTkLabel(a1, text="R_series:", width=90, text_color="gray60").pack(side="left")
+        self.lbl_rs = ctk.CTkLabel(a1, text="--", width=70, anchor="w", text_color="gray60")
+        self.lbl_rs.pack(side="left", padx=2)
+        ctk.CTkLabel(a1, text="\u03a9", text_color="gray60").pack(side="left")
+        ctk.CTkLabel(a1, text="VIL:", text_color="gray60").pack(side="left", padx=(15, 2))
+        self.lbl_vil = ctk.CTkLabel(a1, text="--", width=50, anchor="w", text_color="gray60")
+        self.lbl_vil.pack(side="left", padx=2)
+        ctk.CTkLabel(a1, text="V", text_color="gray60").pack(side="left")
+        ctk.CTkLabel(a1, text="VIH:", text_color="gray60").pack(side="left", padx=(15, 2))
+        self.lbl_vih = ctk.CTkLabel(a1, text="--", width=50, anchor="w", text_color="gray60")
+        self.lbl_vih.pack(side="left", padx=2)
+        ctk.CTkLabel(a1, text="V", text_color="gray60").pack(side="left")
+        ctk.CTkLabel(a1, text="V_high:", text_color="gray60").pack(side="left", padx=(15, 2))
+        self.lbl_vhigh = ctk.CTkLabel(a1, text="--", width=50, anchor="w", text_color="gray60")
+        self.lbl_vhigh.pack(side="left", padx=2)
+        ctk.CTkLabel(a1, text="V", text_color="gray60").pack(side="left")
 
-        r2 = ctk.CTkFrame(net, fg_color="transparent"); r2.pack(fill="x", pady=1)
-        ctk.CTkLabel(r2, text="C_diode:", width=90).pack(side="left")
-        self.c_diode = ctk.CTkEntry(r2, width=70); self.c_diode.pack(side="left", padx=2)
+        # Uniform widths for all rows
+        LBL_W = 90   # label width
+        ENT_W = 80   # entry width
+        UNIT_W = 35  # unit label width
+
+        # Capacitance (bandwidth-specific)
+        ctk.CTkLabel(self, text="Capacitance", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(10, 2))
+        cap = ctk.CTkFrame(self, fg_color="transparent"); cap.pack(fill="x", padx=5)
+
+        c1 = ctk.CTkFrame(cap, fg_color="transparent"); c1.pack(fill="x", pady=2)
+        ctk.CTkLabel(c1, text="C_diode:", width=LBL_W).pack(side="left")
+        self.c_diode = ctk.CTkEntry(c1, width=ENT_W); self.c_diode.pack(side="left", padx=2)
         self.c_diode.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(r2, text="pF").pack(side="left")
-        ctk.CTkLabel(r2, text="C_pin:").pack(side="left", padx=(15, 2))
-        self.c_pin = ctk.CTkEntry(r2, width=50); self.c_pin.pack(side="left", padx=2)
+        ctk.CTkLabel(c1, text="pF", width=UNIT_W).pack(side="left")
+        _help_btn(c1, "Protection diode junction capacitance at 0V reverse bias.\nFind in the diode datasheet under \"junction capacitance\" or \"Cj\".")
+
+        c2 = ctk.CTkFrame(cap, fg_color="transparent"); c2.pack(fill="x", pady=2)
+        ctk.CTkLabel(c2, text="C_pin:", width=LBL_W).pack(side="left")
+        self.c_pin = ctk.CTkEntry(c2, width=ENT_W); self.c_pin.pack(side="left", padx=2)
         self.c_pin.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(r2, text="pF").pack(side="left")
-        ctk.CTkLabel(r2, text="C_stray:").pack(side="left", padx=(15, 2))
-        self.c_stray = ctk.CTkEntry(r2, width=50); self.c_stray.pack(side="left", padx=2)
+        ctk.CTkLabel(c2, text="pF", width=UNIT_W).pack(side="left")
+        _help_btn(c2, "MCU GPIO input capacitance.\nFind in the MCU datasheet under GPIO electrical specifications.")
+
+        c3 = ctk.CTkFrame(cap, fg_color="transparent"); c3.pack(fill="x", pady=2)
+        ctk.CTkLabel(c3, text="C_stray:", width=LBL_W).pack(side="left")
+        self.c_stray = ctk.CTkEntry(c3, width=ENT_W); self.c_stray.pack(side="left", padx=2)
         self.c_stray.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(r2, text="pF").pack(side="left")
-
-        # Thresholds
-        ctk.CTkLabel(self, text="MCU Thresholds", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(10, 2))
-        thr = ctk.CTkFrame(self, fg_color="transparent"); thr.pack(fill="x", padx=5)
-
-        r3 = ctk.CTkFrame(thr, fg_color="transparent"); r3.pack(fill="x", pady=1)
-        ctk.CTkLabel(r3, text="VIL:", width=90).pack(side="left")
-        self.vil = ctk.CTkEntry(r3, width=70); self.vil.pack(side="left", padx=2)
-        self.vil.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(r3, text="V").pack(side="left")
-        ctk.CTkLabel(r3, text="VIH:").pack(side="left", padx=(15, 2))
-        self.vih = ctk.CTkEntry(r3, width=70); self.vih.pack(side="left", padx=2)
-        self.vih.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(r3, text="V").pack(side="left")
-        ctk.CTkLabel(r3, text="V_high:").pack(side="left", padx=(15, 2))
-        self.v_high = ctk.CTkEntry(r3, width=70); self.v_high.pack(side="left", padx=2)
-        self.v_high.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(r3, text="V").pack(side="left")
+        ctk.CTkLabel(c3, text="pF", width=UNIT_W).pack(side="left")
+        _help_btn(c3, "PCB parasitic/stray capacitance estimate.\nTypically 2-5 pF. Depends on trace length and layout.")
 
         # Digital sampling
         ctk.CTkLabel(self, text="Digital Sampling", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(10, 2))
         dig = ctk.CTkFrame(self, fg_color="transparent"); dig.pack(fill="x", padx=5)
 
-        r4 = ctk.CTkFrame(dig, fg_color="transparent"); r4.pack(fill="x", pady=1)
-        ctk.CTkLabel(r4, text="f_periph:", width=90).pack(side="left")
-        self.f_periph = ctk.CTkEntry(r4, width=70); self.f_periph.pack(side="left", padx=2)
+        d1 = ctk.CTkFrame(dig, fg_color="transparent"); d1.pack(fill="x", pady=2)
+        ctk.CTkLabel(d1, text="f_periph:", width=LBL_W).pack(side="left")
+        self.f_periph = ctk.CTkEntry(d1, width=ENT_W); self.f_periph.pack(side="left", padx=2)
         self.f_periph.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(r4, text="MHz").pack(side="left")
-        ctk.CTkLabel(r4, text="N_samples:").pack(side="left", padx=(15, 2))
-        self.n_samples = ctk.CTkEntry(r4, width=50); self.n_samples.pack(side="left", padx=2)
+        ctk.CTkLabel(d1, text="MHz", width=UNIT_W).pack(side="left")
+        _help_btn(d1, "Peripheral clock frequency that samples the input pin.\nFind in the MCU reference manual clock tree diagram.")
+
+        d2 = ctk.CTkFrame(dig, fg_color="transparent"); d2.pack(fill="x", pady=2)
+        ctk.CTkLabel(d2, text="N_samples:", width=LBL_W).pack(side="left")
+        self.n_samples = ctk.CTkEntry(d2, width=ENT_W); self.n_samples.pack(side="left", padx=2)
         self.n_samples.bind("<KeyRelease>", self._on_change)
+        ctk.CTkLabel(d2, text="", width=UNIT_W).pack(side="left")
+        _help_btn(d2, "Minimum consecutive samples required for valid edge detection.\nFind in the MCU reference manual under timer/input capture digital filter settings.")
 
         # Counter overflow
         ctk.CTkLabel(self, text="Counter Overflow", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(10, 2))
         cnt = ctk.CTkFrame(self, fg_color="transparent"); cnt.pack(fill="x", padx=5)
 
-        r5 = ctk.CTkFrame(cnt, fg_color="transparent"); r5.pack(fill="x", pady=1)
-        ctk.CTkLabel(r5, text="Bits:", width=90).pack(side="left")
-        self.counter_bits = ctk.CTkEntry(r5, width=50); self.counter_bits.pack(side="left", padx=2)
+        e1 = ctk.CTkFrame(cnt, fg_color="transparent"); e1.pack(fill="x", pady=2)
+        ctk.CTkLabel(e1, text="Bits:", width=LBL_W).pack(side="left")
+        self.counter_bits = ctk.CTkEntry(e1, width=ENT_W); self.counter_bits.pack(side="left", padx=2)
         self.counter_bits.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(r5, text="Signed:").pack(side="left", padx=(15, 2))
-        self.counter_signed = ctk.CTkCheckBox(r5, text="", width=30)
+        ctk.CTkLabel(e1, text="", width=UNIT_W).pack(side="left")
+        _help_btn(e1, "Hardware counter width in bits (e.g. 16 or 32).\nFind in the MCU reference manual under timer/counter chapter.")
+
+        e2 = ctk.CTkFrame(cnt, fg_color="transparent"); e2.pack(fill="x", pady=2)
+        ctk.CTkLabel(e2, text="Signed:", width=LBL_W).pack(side="left")
+        self.counter_signed = ctk.CTkCheckBox(e2, text="", width=ENT_W)
         self.counter_signed.pack(side="left", padx=2)
         self.counter_signed.configure(command=self._on_change)
-        ctk.CTkLabel(r5, text="f_read:").pack(side="left", padx=(15, 2))
-        self.f_read = ctk.CTkEntry(r5, width=70); self.f_read.pack(side="left", padx=2)
+        ctk.CTkLabel(e2, text="", width=UNIT_W).pack(side="left")
+        _help_btn(e2, "Check if the counter counts +/- (signed).\nUses one bit for sign, halving the max count range.")
+
+        e3 = ctk.CTkFrame(cnt, fg_color="transparent"); e3.pack(fill="x", pady=2)
+        ctk.CTkLabel(e3, text="f_read:", width=LBL_W).pack(side="left")
+        self.f_read = ctk.CTkEntry(e3, width=ENT_W); self.f_read.pack(side="left", padx=2)
         self.f_read.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(r5, text="Hz").pack(side="left")
+        ctk.CTkLabel(e3, text="Hz", width=UNIT_W).pack(side="left")
+        _help_btn(e3, "How often firmware reads/resets the counter.\nTypically your PID loop rate or main polling frequency.")
 
     def push_to_state(self):
         bp = self.app_state.bandwidth_params
-        bp.r_series_ohms = _safe_float(self.r_series, 100)
-        bp.c_diode_pf = _safe_float(self.c_diode, 95)
-        bp.c_pin_pf = _safe_float(self.c_pin, 10)
-        bp.c_stray_pf = _safe_float(self.c_stray, 3)
-        bp.vil_v = _safe_float(self.vil, 0.99)
-        bp.vih_v = _safe_float(self.vih, 2.31)
-        bp.v_high = _safe_float(self.v_high, 3.3)
-        bp.f_peripheral_mhz = _safe_float(self.f_periph, 170)
-        bp.n_samples = int(_safe_float(self.n_samples, 3))
-        bp.counter_bits = int(_safe_float(self.counter_bits, 16))
+        # Auto-pull from other panels via AppState
+        bp.r_series_ohms = self.app_state.resistors.rs_ohms
+        vdd = self.app_state.mcu.vdd
+        bp.vil_v = self.app_state.system.v_logic_low_max * (vdd / 3.3) if vdd > 0 else 0
+        bp.vih_v = self.app_state.system.v_logic_high_min * (vdd / 3.3) if vdd > 0 else 0
+        bp.v_high = vdd
+        # Bandwidth-specific inputs
+        bp.c_diode_pf = _safe_float(self.c_diode, 0)
+        bp.c_pin_pf = _safe_float(self.c_pin, 0)
+        bp.c_stray_pf = _safe_float(self.c_stray, 0)
+        bp.f_peripheral_mhz = _safe_float(self.f_periph, 0)
+        bp.n_samples = int(_safe_float(self.n_samples, 0))
+        bp.counter_bits = int(_safe_float(self.counter_bits, 0))
         bp.counter_signed = bool(self.counter_signed.get())
-        bp.f_read_hz = _safe_float(self.f_read, 1000)
+        bp.f_read_hz = _safe_float(self.f_read, 0)
+
+    def refresh_auto_values(self):
+        """Update the read-only labels from AppState (called after main recalc)."""
+        rs = self.app_state.resistors.rs_ohms
+        vdd = self.app_state.mcu.vdd
+        vil = self.app_state.system.v_logic_low_max * (vdd / 3.3) if vdd > 0 else 0
+        vih = self.app_state.system.v_logic_high_min * (vdd / 3.3) if vdd > 0 else 0
+        self.lbl_rs.configure(text=f"{rs:.0f}" if rs else "--")
+        self.lbl_vil.configure(text=f"{vil:.2f}" if vdd > 0 else "--")
+        self.lbl_vih.configure(text=f"{vih:.2f}" if vdd > 0 else "--")
+        self.lbl_vhigh.configure(text=f"{vdd:.2f}" if vdd > 0 else "--")
 
     def _on_change(self, event=None):
         self.push_to_state()
