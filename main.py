@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Resistor Divider Calculator with Zener Clamp Protection Analysis
-For STM32 GPIO/ADC input protection circuit design
+MCU Input Protection Calculator
+Voltage divider with Zener clamp protection analysis for any MCU GPIO/ADC input.
 
 Entry point for the modular application.
 File extension: .div

@@ -88,7 +88,7 @@ class AppState:
         if self._on_title_changed:
             name = os.path.basename(self.current_file) if self.current_file else "Untitled"
             dirty = " *" if self.is_dirty else ""
-            self._on_title_changed(f"Divider Calculator v1.1 - {name}{dirty}")
+            self._on_title_changed(f"MCU Input Protection Calculator - {name}{dirty}")
 
     # ── Recalculate ───────────────────────────────────────────────────────
 

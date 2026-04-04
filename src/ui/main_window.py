@@ -27,7 +27,7 @@ class MainWindow(ctk.CTk):
         super().__init__()
 
         # Window setup
-        self.title("Divider Calculator v1.1 - Untitled")
+        self.title("MCU Input Protection Calculator - Untitled")
         self.geometry("1400x900")
         self.minsize(1200, 800)
 

@@ -1,6 +1,6 @@
-# STM32 Resistor Divider Calculator
+# MCU Input Protection Calculator
 
-A Python desktop application for designing and analyzing voltage divider circuits with Zener clamp protection for STM32 microcontroller GPIO/ADC inputs. Calculates safe operating margins when interfacing external 0-30V signals with 3.3V MCU pins.
+A Python desktop application for designing and analyzing voltage divider circuits with Zener clamp protection for microcontroller GPIO/ADC inputs. Calculates safe operating margins when interfacing external signals with MCU pins. Works with any MCU family — STM32, ESP32, PIC, AVR, and more.
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
