@@ -182,6 +182,12 @@ class ZenerPanel(ctk.CTkFrame):
         self._build()
 
     def _build(self):
+        # Uniform widths
+        LBL = 70   # first label
+        ENT = 60   # entry field
+        UNT = 50   # unit label
+        LBL2 = 40  # second label on same row
+
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=5)
         ctk.CTkLabel(header, text="Zener Diode", font=("", 14, "bold")).pack(side="left")
@@ -200,54 +206,56 @@ class ZenerPanel(ctk.CTkFrame):
         # Row 1: VZ nom, min, max
         row1 = ctk.CTkFrame(params, fg_color="transparent")
         row1.pack(fill="x", pady=2)
-        ctk.CTkLabel(row1, text="VZ:", width=50).pack(side="left")
-        self.vz_nom = ctk.CTkEntry(row1, width=60); self.vz_nom.pack(side="left", padx=2)
+        ctk.CTkLabel(row1, text="VZ nom:", width=LBL).pack(side="left")
+        self.vz_nom = ctk.CTkEntry(row1, width=ENT); self.vz_nom.pack(side="left", padx=2)
         self.vz_nom.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row1, text="V (nom)").pack(side="left")
-        self.vz_min = ctk.CTkEntry(row1, width=60); self.vz_min.pack(side="left", padx=(15, 2))
+        ctk.CTkLabel(row1, text="V", width=LBL2).pack(side="left")
+        ctk.CTkLabel(row1, text="min:", width=LBL2).pack(side="left")
+        self.vz_min = ctk.CTkEntry(row1, width=ENT); self.vz_min.pack(side="left", padx=2)
         self.vz_min.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row1, text="V (min)").pack(side="left")
-        self.vz_max = ctk.CTkEntry(row1, width=60); self.vz_max.pack(side="left", padx=(15, 2))
+        ctk.CTkLabel(row1, text="V", width=LBL2).pack(side="left")
+        ctk.CTkLabel(row1, text="max:", width=LBL2).pack(side="left")
+        self.vz_max = ctk.CTkEntry(row1, width=ENT); self.vz_max.pack(side="left", padx=2)
         self.vz_max.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row1, text="V (max)").pack(side="left")
+        ctk.CTkLabel(row1, text="V", width=LBL2).pack(side="left")
 
         # Row 2: IZT, ZZT typ/max
         row2 = ctk.CTkFrame(params, fg_color="transparent")
         row2.pack(fill="x", pady=2)
-        ctk.CTkLabel(row2, text="@IZT:", width=50).pack(side="left")
-        self.izt = ctk.CTkEntry(row2, width=60); self.izt.pack(side="left", padx=2)
+        ctk.CTkLabel(row2, text="@IZT:", width=LBL).pack(side="left")
+        self.izt = ctk.CTkEntry(row2, width=ENT); self.izt.pack(side="left", padx=2)
         self.izt.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row2, text="mA").pack(side="left")
-        ctk.CTkLabel(row2, text="ZZT:").pack(side="left", padx=(15, 2))
-        self.zzt_typ = ctk.CTkEntry(row2, width=50); self.zzt_typ.pack(side="left", padx=2)
+        ctk.CTkLabel(row2, text="mA", width=LBL2).pack(side="left")
+        ctk.CTkLabel(row2, text="ZZT:", width=LBL2).pack(side="left")
+        self.zzt_typ = ctk.CTkEntry(row2, width=ENT); self.zzt_typ.pack(side="left", padx=2)
         self.zzt_typ.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row2, text="\u03a9 typ").pack(side="left")
-        self.zzt_max = ctk.CTkEntry(row2, width=50); self.zzt_max.pack(side="left", padx=(10, 2))
+        ctk.CTkLabel(row2, text="\u03a9 typ", width=UNT).pack(side="left")
+        self.zzt_max = ctk.CTkEntry(row2, width=ENT); self.zzt_max.pack(side="left", padx=2)
         self.zzt_max.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row2, text="\u03a9 max").pack(side="left")
+        ctk.CTkLabel(row2, text="\u03a9 max", width=UNT).pack(side="left")
 
         # Row 3: IZK, ZZK typ/max
         row3 = ctk.CTkFrame(params, fg_color="transparent")
         row3.pack(fill="x", pady=2)
-        ctk.CTkLabel(row3, text="@IZK:", width=50).pack(side="left")
-        self.izk = ctk.CTkEntry(row3, width=60); self.izk.pack(side="left", padx=2)
+        ctk.CTkLabel(row3, text="@IZK:", width=LBL).pack(side="left")
+        self.izk = ctk.CTkEntry(row3, width=ENT); self.izk.pack(side="left", padx=2)
         self.izk.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row3, text="mA").pack(side="left")
-        ctk.CTkLabel(row3, text="ZZK:").pack(side="left", padx=(15, 2))
-        self.zzk_typ = ctk.CTkEntry(row3, width=50); self.zzk_typ.pack(side="left", padx=2)
+        ctk.CTkLabel(row3, text="mA", width=LBL2).pack(side="left")
+        ctk.CTkLabel(row3, text="ZZK:", width=LBL2).pack(side="left")
+        self.zzk_typ = ctk.CTkEntry(row3, width=ENT); self.zzk_typ.pack(side="left", padx=2)
         self.zzk_typ.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row3, text="\u03a9 typ").pack(side="left")
-        self.zzk_max = ctk.CTkEntry(row3, width=50); self.zzk_max.pack(side="left", padx=(10, 2))
+        ctk.CTkLabel(row3, text="\u03a9 typ", width=UNT).pack(side="left")
+        self.zzk_max = ctk.CTkEntry(row3, width=ENT); self.zzk_max.pack(side="left", padx=2)
         self.zzk_max.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row3, text="\u03a9 max").pack(side="left")
+        ctk.CTkLabel(row3, text="\u03a9 max", width=UNT).pack(side="left")
 
         # Row 4: Ptot
         row4 = ctk.CTkFrame(params, fg_color="transparent")
         row4.pack(fill="x", pady=2)
-        ctk.CTkLabel(row4, text="Ptot:", width=50).pack(side="left")
-        self.ptot = ctk.CTkEntry(row4, width=60); self.ptot.pack(side="left", padx=2)
+        ctk.CTkLabel(row4, text="Ptot:", width=LBL).pack(side="left")
+        self.ptot = ctk.CTkEntry(row4, width=ENT); self.ptot.pack(side="left", padx=2)
         self.ptot.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row4, text="mW").pack(side="left")
+        ctk.CTkLabel(row4, text="mW", width=LBL2).pack(side="left")
 
     def push_to_state(self):
         z = self.app_state.zener
@@ -327,31 +335,41 @@ class McuPanel(ctk.CTkFrame):
         self._build()
 
     def _build(self):
+        LBL = 110  # label width
+        ENT = 80   # entry width
+        UNT = 35   # unit width
+
         ctk.CTkLabel(self, text="MCU Pin Input Limits", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
         params = ctk.CTkFrame(self, fg_color="transparent")
         params.pack(fill="x", padx=10, pady=5)
 
         row1 = ctk.CTkFrame(params, fg_color="transparent")
         row1.pack(fill="x", pady=2)
-        ctk.CTkLabel(row1, text="VDD/VDDA:", width=90).pack(side="left")
-        self.vdd = ctk.CTkEntry(row1, width=60); self.vdd.pack(side="left", padx=2)
+        ctk.CTkLabel(row1, text="VDD/VDDA:", width=LBL).pack(side="left")
+        self.vdd = ctk.CTkEntry(row1, width=ENT); self.vdd.pack(side="left", padx=2)
         self.vdd.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row1, text="V").pack(side="left")
-        ctk.CTkLabel(row1, text="Safe Max:").pack(side="left", padx=(20, 2))
-        self.rec_max = ctk.CTkEntry(row1, width=60); self.rec_max.pack(side="left", padx=2)
-        self.rec_max.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row1, text="V").pack(side="left")
+        ctk.CTkLabel(row1, text="V", width=UNT).pack(side="left")
 
         row2 = ctk.CTkFrame(params, fg_color="transparent")
         row2.pack(fill="x", pady=2)
-        ctk.CTkLabel(row2, text="Abs. Max:", width=90).pack(side="left")
-        self.abs_max = ctk.CTkEntry(row2, width=60); self.abs_max.pack(side="left", padx=2)
+        ctk.CTkLabel(row2, text="Safe Max:", width=LBL).pack(side="left")
+        self.rec_max = ctk.CTkEntry(row2, width=ENT); self.rec_max.pack(side="left", padx=2)
+        self.rec_max.bind("<KeyRelease>", self._on_change)
+        ctk.CTkLabel(row2, text="V", width=UNT).pack(side="left")
+
+        row3 = ctk.CTkFrame(params, fg_color="transparent")
+        row3.pack(fill="x", pady=2)
+        ctk.CTkLabel(row3, text="Abs. Max:", width=LBL).pack(side="left")
+        self.abs_max = ctk.CTkEntry(row3, width=ENT); self.abs_max.pack(side="left", padx=2)
         self.abs_max.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row2, text="V").pack(side="left")
-        ctk.CTkLabel(row2, text="Injection Limit:").pack(side="left", padx=(20, 2))
-        self.inj_safe = ctk.CTkEntry(row2, width=60); self.inj_safe.pack(side="left", padx=2)
+        ctk.CTkLabel(row3, text="V", width=UNT).pack(side="left")
+
+        row4 = ctk.CTkFrame(params, fg_color="transparent")
+        row4.pack(fill="x", pady=2)
+        ctk.CTkLabel(row4, text="Injection Limit:", width=LBL).pack(side="left")
+        self.inj_safe = ctk.CTkEntry(row4, width=ENT); self.inj_safe.pack(side="left", padx=2)
         self.inj_safe.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row2, text="mA").pack(side="left")
+        ctk.CTkLabel(row4, text="mA", width=UNT).pack(side="left")
 
     def push_to_state(self):
         m = self.app_state.mcu
@@ -388,31 +406,41 @@ class SystemPanel(ctk.CTkFrame):
         self._build()
 
     def _build(self):
+        LBL = 110  # label width
+        ENT = 80   # entry width
+        UNT = 45   # unit width
+
         ctk.CTkLabel(self, text="System Requirements", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
         params = ctk.CTkFrame(self, fg_color="transparent")
         params.pack(fill="x", padx=10, pady=5)
 
         row1 = ctk.CTkFrame(params, fg_color="transparent")
         row1.pack(fill="x", pady=2)
-        ctk.CTkLabel(row1, text="Max Input:", width=90).pack(side="left")
-        self.vin_max = ctk.CTkEntry(row1, width=60); self.vin_max.pack(side="left", padx=2)
+        ctk.CTkLabel(row1, text="Max Input:", width=LBL).pack(side="left")
+        self.vin_max = ctk.CTkEntry(row1, width=ENT); self.vin_max.pack(side="left", padx=2)
         self.vin_max.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row1, text="V").pack(side="left")
-        ctk.CTkLabel(row1, text="ADC Scale:").pack(side="left", padx=(20, 2))
-        self.analog_fs = ctk.CTkEntry(row1, width=60); self.analog_fs.pack(side="left", padx=2)
-        self.analog_fs.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row1, text="V").pack(side="left")
+        ctk.CTkLabel(row1, text="V", width=UNT).pack(side="left")
 
         row2 = ctk.CTkFrame(params, fg_color="transparent")
         row2.pack(fill="x", pady=2)
-        ctk.CTkLabel(row2, text="Logic High:", width=90).pack(side="left")
-        self.logic_high = ctk.CTkEntry(row2, width=60); self.logic_high.pack(side="left", padx=2)
+        ctk.CTkLabel(row2, text="ADC Scale:", width=LBL).pack(side="left")
+        self.analog_fs = ctk.CTkEntry(row2, width=ENT); self.analog_fs.pack(side="left", padx=2)
+        self.analog_fs.bind("<KeyRelease>", self._on_change)
+        ctk.CTkLabel(row2, text="V", width=UNT).pack(side="left")
+
+        row3 = ctk.CTkFrame(params, fg_color="transparent")
+        row3.pack(fill="x", pady=2)
+        ctk.CTkLabel(row3, text="Logic High:", width=LBL).pack(side="left")
+        self.logic_high = ctk.CTkEntry(row3, width=ENT); self.logic_high.pack(side="left", padx=2)
         self.logic_high.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row2, text="V min").pack(side="left")
-        ctk.CTkLabel(row2, text="Logic Low:").pack(side="left", padx=(20, 2))
-        self.logic_low = ctk.CTkEntry(row2, width=60); self.logic_low.pack(side="left", padx=2)
+        ctk.CTkLabel(row3, text="V min", width=UNT).pack(side="left")
+
+        row4 = ctk.CTkFrame(params, fg_color="transparent")
+        row4.pack(fill="x", pady=2)
+        ctk.CTkLabel(row4, text="Logic Low:", width=LBL).pack(side="left")
+        self.logic_low = ctk.CTkEntry(row4, width=ENT); self.logic_low.pack(side="left", padx=2)
         self.logic_low.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row2, text="V max").pack(side="left")
+        ctk.CTkLabel(row4, text="V max", width=UNT).pack(side="left")
 
     def push_to_state(self):
         s = self.app_state.system
@@ -472,12 +500,14 @@ class NotesPanel(ctk.CTkFrame):
 # ── Tooltip Helper ────────────────────────────────────────────────────────────
 
 class _Tooltip:
-    """Popup tooltip that appears near a widget on hover or click."""
+    """Popup tooltip that appears near a widget on hover or click.
+    Auto-dismisses after 4 seconds or when the mouse leaves."""
 
     def __init__(self, widget: ctk.CTkBaseClass, text: str):
         self.widget = widget
         self.text = text
         self._tw = None
+        self._hide_id = None
         widget.bind("<Enter>", self._show)
         widget.bind("<Leave>", self._hide)
         widget.bind("<Button-1>", self._toggle)
@@ -491,15 +521,28 @@ class _Tooltip:
         tw.wm_overrideredirect(True)
         tw.wm_geometry(f"+{x}+{y}")
         tw.attributes("-topmost", True)
+        # Close tooltip if user clicks anywhere on it
+        tw.bind("<Button-1>", lambda e: self._hide())
         frame = ctk.CTkFrame(tw, corner_radius=6, border_width=1,
                              border_color="gray50", fg_color=("gray90", "gray20"))
         frame.pack()
         ctk.CTkLabel(frame, text=self.text, wraplength=300, justify="left",
                      font=("", 12), padx=8, pady=6).pack()
+        # Auto-dismiss after 4 seconds
+        self._hide_id = self.widget.after(4000, self._hide)
 
     def _hide(self, event=None):
+        if self._hide_id:
+            try:
+                self.widget.after_cancel(self._hide_id)
+            except Exception:
+                pass
+            self._hide_id = None
         if self._tw:
-            self._tw.destroy()
+            try:
+                self._tw.destroy()
+            except Exception:
+                pass
             self._tw = None
 
     def _toggle(self, event=None):

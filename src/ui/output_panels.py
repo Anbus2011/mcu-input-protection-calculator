@@ -9,15 +9,29 @@ from typing import Optional
 
 from src.models.circuit_model import CalculationResult
 from src.models.bandwidth_model import BandwidthResult
+from src.ui.input_panels import _Tooltip
 
 
 # ── Table-row helpers ──────���──────────────────────────────────────────────────
 
-def _table_header(parent, texts, widths):
+def _table_header(parent, texts, widths, tooltips=None):
     for i, (text, w) in enumerate(zip(texts, widths)):
-        lbl = ctk.CTkLabel(parent, text=text, width=w, font=("", 12, "bold"),
-                           anchor="w", fg_color=("gray80", "gray25"))
-        lbl.grid(row=0, column=i, padx=1, pady=1, sticky="ew")
+        if tooltips and i < len(tooltips) and tooltips[i]:
+            # Header cell with ? tooltip
+            frame = ctk.CTkFrame(parent, fg_color=("gray80", "gray25"), corner_radius=0)
+            frame.grid(row=0, column=i, padx=1, pady=1, sticky="ew")
+            ctk.CTkLabel(frame, text=text, font=("", 12, "bold"), anchor="w",
+                         fg_color="transparent").pack(side="left", padx=(4, 0))
+            tip_btn = ctk.CTkLabel(frame, text="?", width=16, height=16,
+                                   fg_color=("gray65", "gray45"), corner_radius=8,
+                                   font=("", 10, "bold"), text_color=("gray20", "gray90"),
+                                   cursor="hand2")
+            tip_btn.pack(side="left", padx=(3, 2))
+            _Tooltip(tip_btn, tooltips[i])
+        else:
+            lbl = ctk.CTkLabel(parent, text=text, width=w, font=("", 12, "bold"),
+                               anchor="w", fg_color=("gray80", "gray25"))
+            lbl.grid(row=0, column=i, padx=1, pady=1, sticky="ew")
 
 
 def _table_row(parent, label, unit, row_num, col_widths):
@@ -159,7 +173,14 @@ class SafetyTab:
         ctk.CTkLabel(parent, text="Voltage Limits (at Max Input)", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(10, 5))
         vt = ctk.CTkFrame(parent, fg_color="transparent"); vt.pack(fill="x", padx=10)
         vw = [150, 90, 90, 90, 80]
-        _table_header(vt, ["Parameter", "V_mcu", "Limit", "Margin", "Status"], vw)
+        vt_tips = [
+            None,
+            "Worst-case voltage at the MCU pin.\nCalculated with tolerance-shifted resistors\nand worst-case Zener at maximum input voltage.",
+            "The MCU voltage threshold being compared against.\nSafe Max = recommended operating limit.\nAbs Max = damage threshold from datasheet.",
+            "How much headroom remains: Limit minus V_mcu.\nPositive = safe, negative = exceeded.",
+            "PASS = safe margin.\nTIGHT = within spec but close.\nFAIL = limit exceeded.",
+        ]
+        _table_header(vt, ["Parameter", "V_mcu", "Limit", "Margin", "Status"], vw, vt_tips)
         self.rec_row = _safety_row(vt, "vs Safe Max", 1, vw)
         self.abs_row = _safety_row(vt, "vs Absolute Max", 2, vw)
 
@@ -167,7 +188,13 @@ class SafetyTab:
         ctk.CTkLabel(parent, text="Injection Current", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
         it = ctk.CTkFrame(parent, fg_color="transparent"); it.pack(fill="x", padx=10)
         iw = [150, 90, 90, 100]
-        _table_header(it, ["Parameter", "Value", "Limit", "Status"], iw)
+        it_tips = [
+            None,
+            "Estimated current flowing into the MCU's\ninternal ESD clamp diode when V_mcu exceeds VDD.\nI_inj = (V_mcu - VDD) / (R_series + ~100\u03a9 internal).",
+            "Maximum safe injection current from the\nMCU datasheet (absolute max rating).",
+            "OK = well within limit.\nMARGINAL = approaching limit.\nHIGH = exceeds safe injection current.",
+        ]
+        _table_header(it, ["Parameter", "Value", "Limit", "Status"], iw, it_tips)
         self.inj_row = _inj_row(it, "Estimated", 1, iw)
 
         # ADC performance
