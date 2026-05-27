@@ -17,7 +17,7 @@ from src.core.app_state import AppState
 from src.models.circuit_model import CalculationResult
 from src.models.bandwidth_model import BandwidthResult
 from src.ui.input_panels import (
-    ResistorPanel, ZenerPanel, McuPanel, SystemPanel, NotesPanel,
+    ResistorPanel, ClampPanel, McuPanel, SystemPanel, NotesPanel,
     BandwidthInputPanel,
 )
 from src.ui.output_panels import (
@@ -53,6 +53,10 @@ class MainWindow(ctk.CTk):
 
         # Close handler
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Initial calc so output tabs (incl. bandwidth) populate at startup
+        # instead of showing "--" until the user touches an input.
+        self.app_state.recalculate()
 
     # ── Icon ──────────────────────────────────────────────────────────────
 
@@ -157,7 +161,7 @@ class MainWindow(ctk.CTk):
         self.app_state.file_new()
         self.app_state.ignore_changes = True
         self.resistor_panel.clear_fields()
-        self.zener_panel.clear_fields()
+        self.clamp_panel.clear_fields()
         self.mcu_panel.clear_fields()
         self.system_panel.clear_fields()
         self.notes_panel.clear_fields()
@@ -176,7 +180,7 @@ class MainWindow(ctk.CTk):
             data = self.app_state.open_file(filepath)
             self.app_state.ignore_changes = True
             self.resistor_panel.load_from_data(data)
-            self.zener_panel.load_from_data(data)
+            self.clamp_panel.load_from_data(data)
             self.mcu_panel.load_from_data(data)
             self.system_panel.load_from_data(data)
             self.notes_panel.load_from_data(data)
@@ -208,7 +212,28 @@ class MainWindow(ctk.CTk):
 
     def _on_close(self):
         if self._check_save():
-            self.destroy()
+            # Cancel all pending after() callbacks before destroy.
+            # CustomTkinter registers internal after-handles (DPI scaling, etc.)
+            # that fire on dead widgets if we destroy() without cancelling.
+            try:
+                for after_id in self.tk.eval("after info").split():
+                    try:
+                        self.after_cancel(after_id)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            self.quit()
+            # Defensive: CustomTkinter's destroy() override raises
+            # TclError("can't delete Tcl command") on Python 3.14 due to
+            # an upstream CTk bug (double-delete of a Tcl command during
+            # widget teardown). On Python 3.12/3.13 destroy() succeeds
+            # cleanly and this try/except is a no-op. Remove the except
+            # once CustomTkinter ships a Python 3.14 fix.
+            try:
+                self.destroy()
+            except Exception:
+                pass
 
     # ── Layout ────────────────────────────────────────────────────────────
 
@@ -223,8 +248,8 @@ class MainWindow(ctk.CTk):
         self.resistor_panel = ResistorPanel(left, self.app_state)
         self.resistor_panel.pack(fill="x", pady=5)
 
-        self.zener_panel = ZenerPanel(left, self.app_state)
-        self.zener_panel.pack(fill="x", pady=5)
+        self.clamp_panel = ClampPanel(left, self.app_state)
+        self.clamp_panel.pack(fill="x", pady=5)
 
         self.mcu_panel = McuPanel(left, self.app_state)
         self.mcu_panel.pack(fill="x", pady=5)
@@ -276,7 +301,7 @@ class MainWindow(ctk.CTk):
     def _push_all_to_state(self):
         """Push current UI values into AppState (without triggering recalc)."""
         self.resistor_panel.push_to_state()
-        self.zener_panel.push_to_state()
+        self.clamp_panel.push_to_state()
         self.mcu_panel.push_to_state()
         self.system_panel.push_to_state()
         self.notes_panel.push_to_state()

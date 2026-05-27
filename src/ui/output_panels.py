@@ -121,7 +121,7 @@ class ComponentsTab:
         _table_header(ct, ["Component", "Current", "Power", "Power Rating", "Margin %"], ccw)
         self.r1_row = _component_row(ct, "R1", 1, ccw)
         self.r2_row = _component_row(ct, "R2", 2, ccw)
-        self.z_row = _component_row(ct, "Zener", 3, ccw)
+        self.z_row = _component_row(ct, "Clamp", 3, ccw)
 
         # Clamp voltage
         ctk.CTkLabel(parent, text="Voltage at MCU Pin", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
