@@ -6,9 +6,12 @@ import math
 import pytest
 
 from src.models.circuit_model import (
-    calculate_all, calculate_zener_voltage, get_min_sample_cycles,
+    calculate_all, calculate_with_clamp, calculate_zener_voltage,
+    get_min_sample_cycles,
     ResistorParams, ZenerParams, McuParams, SystemParams,
 )
+from src.models.clamps import SchottkyClamp, TVSClamp
+from src.core.constants import INTERNAL_ESD_VF, INTERNAL_ESD_R
 
 
 # ── Zener voltage model ──────────────────────────────────────────────────────
@@ -299,3 +302,95 @@ class TestEdgeCases:
             ZenerParams(), McuParams(), SystemParams(),
         )
         assert abs(r2.r_source_ohms - r1.r_source_ohms - 1000) < 1
+
+
+# ── Internal ESD injection threshold model ──────────────────────────────────
+
+class TestInjectionVfThreshold:
+    """Internal ESD diode only conducts when V_mcu > VDD + VF_silicon.
+    Below that threshold the formula must return 0 mA regardless of which
+    external clamp is active."""
+
+    def _resistors(self, rs=0):
+        return ResistorParams(
+            r1_ohms=10000, r2_ohms=18000, rs_ohms=rs,
+            r1_tol_pct=1.0, r2_tol_pct=1.0,
+            r1_rating_mw=200, r2_rating_mw=100,
+        )
+
+    def _mcu(self):
+        return McuParams(vdd=3.3, v_recommended_max=3.6,
+                         v_absolute_max=4.0, safe_injection_ma=1.0)
+
+    def _system(self, vin: float = 30.0):
+        return SystemParams(v_input_max=vin, v_analog_fullscale=5.1,
+                            v_logic_high_min=3.8, v_logic_low_max=1.0)
+
+    def test_schottky_bat54cv_no_injection_at_30v(self):
+        """BAT54CV clamps V_mcu to ~VDD + 0.32-0.40V (~3.62-3.70V).
+        Below VDD + 0.6V threshold → internal ESD diode does NOT conduct."""
+        clamp = SchottkyClamp(vf_typ=0.32, vf_max=0.40, if_test_ma=10.0,
+                              r_dynamic=4.0)
+        r = calculate_with_clamp(self._resistors(), clamp, self._mcu(),
+                                 self._system(vin=30), clamp_type="schottky",
+                                 vclamp_nom=3.62, vclamp_max=3.70)
+        # V_mcu_worst must be ≤ VDD + VF_silicon for this assertion to hold.
+        assert r.v_mcu_worst < 3.3 + INTERNAL_ESD_VF
+        assert r.i_injection_ma == 0.0
+
+    def test_zener_bzb984_c3v3_no_injection_at_30v(self):
+        """BZB984-C3V3 clamps V_mcu_worst to ~3.43V — below VDD + 0.6V = 3.9V
+        threshold. Old formula reported ~1.3 mA (over the 1 mA limit); the
+        VF-gated formula correctly reports 0 mA."""
+        z = ZenerParams(vz_nom=3.3, vz_min=3.1, vz_max=3.5,
+                        izt_ma=5.0, izk_ma=1.0,
+                        zzt_typ=85.0, zzt_max=95.0,
+                        zzk_typ=350.0, zzk_max=600.0, ptot_mw=265.0)
+        r = calculate_all(self._resistors(), z, self._mcu(), self._system(vin=30))
+        assert r.v_mcu_worst < 3.3 + INTERNAL_ESD_VF
+        assert r.i_injection_ma == 0.0
+
+    def test_tvs_high_voltage_does_inject(self):
+        """SMBJ60-class TVS (V_BR ≈ 67-74V) at 100V input → V_mcu well above
+        VDD + 0.6V → internal ESD diode conducts. Sanity check that the
+        threshold doesn't suppress real over-current."""
+        clamp = TVSClamp(v_rwm=60.0, v_br_min=66.7, v_br_max=73.7,
+                         v_c=96.8, i_pp=6.2, i_t=1.0, c_pf=380.0,
+                         p_ppm_w=600.0, polarity="unidirectional")
+        r = calculate_with_clamp(self._resistors(), clamp, self._mcu(),
+                                 self._system(vin=100), clamp_type="tvs",
+                                 vclamp_nom=70.0, vclamp_max=73.7)
+        assert r.v_mcu_worst > 3.3 + INTERNAL_ESD_VF
+        # Formula: (V_mcu_worst - VDD - VF) / (rs + 100) * 1000
+        expected = (r.v_mcu_worst - 3.3 - INTERNAL_ESD_VF) / (0 + INTERNAL_ESD_R) * 1000
+        assert abs(r.i_injection_ma - expected) < 0.01
+        assert r.i_injection_ma > 0
+
+    def test_threshold_boundary_just_below(self):
+        """V_mcu exactly at VDD + VF threshold → I_inj must still be 0."""
+        # Construct a synthetic Zener that clamps V_mcu_worst at exactly 3.9V.
+        # Use a high-VZ Zener to suppress clamping below 3.9V.
+        z = ZenerParams(vz_nom=10.0, vz_min=9.5, vz_max=10.5,
+                        izt_ma=5.0, izk_ma=1.0,
+                        zzt_typ=85.0, zzt_max=95.0,
+                        zzk_typ=350.0, zzk_max=600.0, ptot_mw=265.0)
+        # With R1=10k, R2=18k, V_in=6V: V_node = 6 * 18/28 = 3.857V (no clamping).
+        # That's just below VDD + VF = 3.9V.
+        r = calculate_all(self._resistors(), z, self._mcu(), self._system(vin=6.0))
+        assert r.v_mcu_worst < 3.3 + INTERNAL_ESD_VF + 0.01  # ≤ threshold
+        assert r.i_injection_ma == 0.0
+
+    def test_formula_uses_constants(self):
+        """Verify the formula uses INTERNAL_ESD_VF and INTERNAL_ESD_R from
+        constants (not magic numbers). Construct a case well above threshold."""
+        # Synthetic high-V Zener at 30V input — V_mcu_worst should be around
+        # 9-10V (the Zener voltage), well above the 3.9V threshold.
+        z = ZenerParams(vz_nom=9.0, vz_min=8.5, vz_max=9.5,
+                        izt_ma=5.0, izk_ma=1.0,
+                        zzt_typ=85.0, zzt_max=95.0,
+                        zzk_typ=350.0, zzk_max=600.0, ptot_mw=500.0)
+        r = calculate_all(self._resistors(), z, self._mcu(), self._system(vin=30))
+        # Reconstruct what the formula must produce given the constants.
+        expected = ((r.v_mcu_worst - 3.3 - INTERNAL_ESD_VF)
+                    / (0 + INTERNAL_ESD_R) * 1000)
+        assert abs(r.i_injection_ma - expected) < 0.001

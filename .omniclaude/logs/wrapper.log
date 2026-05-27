@@ -1,0 +1,5 @@
+[17:05:31.439] strict_recv: OK size=5151 preview={"session_transfer": "[SESSION_PROMPT_V1]\n<CONTINUATION>\nResume the PR push to the original mcu-in
+[17:05:31.732] === SESSION TRANSFER ===
+[17:05:31.732]   old_claude_pid=2613 new_session=
+[17:05:31.732]   mcp_pids_before_kill=[2643]
+[17:05:31.946]   mcp_cleanup: all dead after 0.114s

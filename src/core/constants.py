@@ -59,6 +59,102 @@ ZENER_PRESETS = {
     }
 }
 
+
+# ============================================================================
+# SCHOTTKY PRESETS - BAT54CV (Nexperia SOT-666 4-channel Schottky array)
+# ============================================================================
+SCHOTTKY_PRESETS = {
+    "BAT54CV": {
+        "vf_typ": 0.32,
+        "vf_max": 0.40,
+        "if_test_ma": 10,
+        "r_dynamic": 4.0,
+        "ir_ua": 2.0,
+        "vr_max": 30,
+        "cd_pf": 10,
+        "pd_mw": 200,
+        "channels": 4,
+    },
+    "Custom": {
+        "vf_typ": 0.32,
+        "vf_max": 0.40,
+        "if_test_ma": 10,
+        "r_dynamic": 4.0,
+        "ir_ua": 2.0,
+        "vr_max": 30,
+        "cd_pf": 10,
+        "pd_mw": 200,
+        "channels": 4,
+    },
+}
+# ============================================================================
+# TVS PRESETS
+# ============================================================================
+TVS_PRESETS = {
+    "SMBJ60": {
+        "v_rwm": 60.0,
+        "v_br_min": 66.7,
+        "v_br_max": 73.7,
+        "v_c": 96.8,
+        "i_pp": 6.2,
+        "i_t": 1.0,
+        "c_pf": 380,
+        "p_ppm_w": 600,
+    },
+    "SMAJ5.0A": {
+        "v_rwm": 5.0,
+        "v_br_min": 6.4,
+        "v_br_max": 7.0,
+        "v_c": 9.2,
+        "i_pp": 43.5,
+        "i_t": 10.0,
+        "c_pf": 850,
+        "p_ppm_w": 400,
+    },
+    "PESD3V3L": {
+        "v_rwm": 3.3,
+        "v_br_min": 4.2,
+        "v_br_max": 6.0,
+        "v_c": 9.0,
+        "i_pp": 1.0,
+        "i_t": 1.0,
+        "c_pf": 0.6,
+        "p_ppm_w": 0.3,
+    },
+    "SMAJ5.0CA": {
+        "v_rwm": 5.0,
+        "v_br_min": 6.4,
+        "v_br_max": 7.0,
+        "v_c": 9.2,
+        "i_pp": 43.5,
+        "i_t": 10.0,
+        "c_pf": 850,
+        "p_ppm_w": 400,
+        "polarity_default": "bidirectional",
+    },
+    "Custom": {
+        "v_rwm": 60.0,
+        "v_br_min": 66.7,
+        "v_br_max": 73.7,
+        "v_c": 96.8,
+        "i_pp": 6.2,
+        "i_t": 1.0,
+        "c_pf": 380,
+        "p_ppm_w": 600,
+    },
+}
+
+
+# ============================================================================
+# MCU INTERNAL ESD CLAMP DIODE (STM32 silicon)
+# ============================================================================
+# Represents the forward path from an I/O pin to VDD through the upper
+# internal ESD diode. Current into this path = "injection current".
+# These values are STM32-class silicon-CMOS typicals; revisit if porting to
+# other MCU families with different ESD structures (e.g. 5V-tolerant pins).
+INTERNAL_ESD_VF = 0.6   # V — silicon diode forward voltage threshold
+INTERNAL_ESD_R  = 100   # Ω — internal series resistance of the ESD path
+
 # ============================================================================
 # ADC SAMPLE TIME REFERENCE (STM32G4)
 # ============================================================================
@@ -116,4 +212,4 @@ RESISTOR_SVG = '''<?xml version="1.0" encoding="UTF-8"?>
 </svg>'''
 
 APP_VERSION = "1.1"
-FILE_FORMAT_VERSION = "1.0"
+FILE_FORMAT_VERSION = "2.0"

@@ -2,9 +2,14 @@
 Signal Bandwidth / Maximum PPS Analysis for protection networks.
 Implements the RC low-pass filter model from the project documentation.
 
-The protection network (R_series + Zener junction capacitance + MCU pin capacitance)
-forms a first-order low-pass filter that limits the maximum signal frequency
-the MCU pin can reliably detect.
+The protection network (R_source + clamp junction capacitance + MCU pin
+capacitance) forms a first-order low-pass filter that limits the maximum
+signal frequency the MCU pin can reliably detect.
+
+R_source is the Thévenin source impedance seen by C_total at the protection
+node = (R1 || R2) + R_series. Callers populate r_series_ohms with this
+Thévenin value, NOT just the optional R_s component. (The param name is
+retained for backward compatibility with existing tests.)
 """
 from __future__ import annotations
 
@@ -15,6 +20,8 @@ from typing import Optional
 
 @dataclass
 class BandwidthParams:
+    # Thévenin source impedance (Ω): (R1 || R2) + R_series_optional.
+    # Param name kept as r_series_ohms for backward compatibility.
     r_series_ohms: float = 100.0
     c_diode_pf: float = 95.0
     c_pin_pf: float = 10.0

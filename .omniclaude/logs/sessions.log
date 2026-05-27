@@ -1,0 +1,2 @@
+[2026-05-27T17:05:31.732] TRANSFER old_pid=2613 new_session=- source=bridge mcp_pids=1
+[2026-05-27T17:05:31.948] SPAWNED new_pid=64800 mode=transfer source=bridge

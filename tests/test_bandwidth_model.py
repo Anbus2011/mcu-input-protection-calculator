@@ -149,3 +149,47 @@ class TestEdgeCases:
         r = calculate_bandwidth(p)
         # Should still compute tau and f_3db
         assert r.tau_ns > 0
+
+
+class TestRSourceThevenin:
+    """Regression: callers MUST pass Thévenin source impedance, not just R_s.
+
+    With R1=10k, R2=18k, R_s=0 the protection-node Thévenin source impedance
+    is (10k || 18k) + 0 = 6428.57 Ω — NOT 0. Passing 0 makes every output
+    blank (the user-visible '--' bug)."""
+
+    def test_user_default_topology_produces_nonempty_result(self):
+        """R1=10k, R2=18k, R_s=0, BAT54CV caps → must produce real numbers."""
+        r_thev = (10000 * 18000) / (10000 + 18000)  # ≈ 6428.57
+        p = BandwidthParams(
+            r_series_ohms=r_thev,
+            c_diode_pf=10, c_pin_pf=5, c_stray_pf=3,   # BAT54CV + STM32G4
+            vil_v=0.99, vih_v=2.31, v_high=3.3,
+            f_peripheral_mhz=170, n_samples=4,
+            counter_bits=16, counter_signed=False, f_read_hz=1000,
+        )
+        r = calculate_bandwidth(p)
+        # tau = 6428 × 18e-12 ≈ 115.7 ns
+        assert r.tau_ns == pytest.approx(115.7, abs=0.5)
+        # f_3db = 1/(2π·τ) ≈ 1.376 MHz
+        assert r.f_3db_hz == pytest.approx(1.376e6, rel=0.01)
+        # all four limits must be > 0 (none blank)
+        assert r.f_max_analog_hz > 0
+        assert r.f_max_practical_hz > 0
+        assert r.f_max_digital_hz > 0
+        assert r.f_max_overflow_hz > 0
+        assert r.f_max_effective_hz > 0
+        assert r.limiting_factor != ""
+
+    def test_passing_zero_r_returns_empty_result(self):
+        """Passing only R_s=0 (the bug condition) must return empty — this
+        documents WHY the UI must compute Thévenin before passing."""
+        p = BandwidthParams(
+            r_series_ohms=0,   # ← bug: caller forgot R1||R2
+            c_diode_pf=10, c_pin_pf=5, c_stray_pf=3,
+        )
+        r = calculate_bandwidth(p)
+        # Documented behavior — all bandwidth outputs blank.
+        assert r.tau_ns == 0
+        assert r.f_3db_hz == 0
+        assert r.f_max_effective_hz == 0
