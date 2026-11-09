@@ -212,10 +212,18 @@ class TestNoHiddenDefaults:
         assert s.report.needs == ["VDD/VDDA"]
 
     def test_unused_blank_fields_block_nothing(self):
+        """Rewritten: only ZZK is unused now (VZ min feeds the worst-case power)."""
         s = ref_state()
-        s.set_fields({"zener.zzk_typ": "", "zener.zzk_max": "", "zener.vz_min": ""})
+        s.set_fields({"zener.zzk_typ": "", "zener.zzk_max": ""})
         assert s.report.needs == []
         assert s.result.v_mcu_worst is not None
+
+    def test_blank_vz_min_needed_only_for_worst_power(self):
+        s = ref_state()
+        s.set_field("zener.vz_min", "")
+        assert s.report.needs == ["VZ min"]
+        assert s.result.p_r1_worst_mw is None
+        assert s.result.v_mcu_worst is not None and s.result.p_r1_mw is not None
 
     def test_saved_blank_is_null(self, tmp_path):
         s = AppState()
@@ -266,8 +274,9 @@ class TestSeriesResistorRules:
         s = ref_state()
         s.set_fields({"rs.value": rs, "rs.unit": "", "rs.rating": "", "rs.tol": ""})
         assert s.report.needs == []
-        assert s.report.unused_blank == []
+        assert s.report.lines() == []
         assert s.resistors.rs_ohms == 0.0
+        assert s.result.has_rs is False and s.result.i_injection_ma == 0.0
         assert s.result.r_source_ohms == pytest.approx(10000 * 18000 / 28000)
 
     def test_rs_needs_unit_when_positive(self):
@@ -276,11 +285,42 @@ class TestSeriesResistorRules:
         assert "R_s unit" in s.report.needs
         assert s.result.r_source_ohms is None
 
-    def test_rs_rating_and_tol_asked_for_when_positive(self):
+    def test_rs_rating_and_tol_needed_when_positive(self):
+        """Rewritten: R_s rating and tolerance are now used (R_s power, and
+        R_s min in the injection estimate), so they are listed as needed."""
         s = ref_state()
         s.set_field("rs.value", "100")
-        assert s.report.unused_blank == ["R_s power rating", "R_s tolerance"]
-        assert "R_s power rating" not in s.report.needs
+        assert s.report.needs == ["R_s power rating", "R_s tolerance"]
+        assert not any("Also blank" in line for line in s.report.lines())
+        assert s.result.i_injection_ma is None and s.result.p_rs_worst_mw is None
+        assert s.result.rs_margin_status is None
+        s.set_fields({"rs.rating": "250", "rs.tol": "5"})
+        assert s.report.needs == []
+        assert s.result.p_rs_worst_mw is not None
+        assert s.result.rs_margin_worst_status is not None
+
+    def test_injection_uses_rs_low_tolerance(self):
+        s = ref_state()
+        s.set_fields({"r1.value": "1", "rs.value": "1", "rs.unit": KOHM,
+                      "rs.rating": "250", "rs.tol": "5"})
+        r = s.result
+        assert r.i_injection_ma == pytest.approx((r.v_mcu_worst - 3.6) / 1050 * 1000)
+
+
+class TestPowerFollowUp:
+    def test_blank_rating_needs_input_without_hint(self):
+        s = ref_state()
+        s.set_field("r1.rating", "")
+        assert s.report.needs == ["R1 power rating"]
+        assert s.result.r1_margin_status is None
+        assert s.result.r1_margin_worst_status is None
+
+    def test_reference_typical_and_worst(self):
+        s = ref_state()
+        r = s.result
+        for part in ("r1", "r2", "z"):
+            assert getattr(r, f"p_{part}_worst_mw") >= getattr(r, f"p_{part}_mw")
+        assert r.i_injection_ma == 0.0
 
 
 class TestUnreadableBlocksSave:

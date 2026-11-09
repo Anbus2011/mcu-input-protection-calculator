@@ -132,7 +132,7 @@ def output_labels(w):
         "vclamp_typ": c.vclamp_typ, "vclamp_worst": c.vclamp_worst,
         "source_z": s.source_z, "sample_cyc": s.sample_cyc, "resolution": s.resolution,
     }
-    for name, row in (("r1", c.r1_row), ("r2", c.r2_row), ("z", c.z_row),
+    for name, row in (("r1", c.r1_row), ("r2", c.r2_row), ("z", c.z_row), ("rs", c.rs_row),
                       ("rec", s.rec_row), ("abs", s.abs_row), ("inj", s.inj_row)):
         for k, lbl in row.items():
             out[f"{name}.{k}"] = lbl
@@ -280,7 +280,9 @@ def test_new_design_clears_everything(w, dialogs):
     independent = {"bw.c_total", "bw.f_overflow", "op0.v_in", "op0.v_mcu_l",
                    "op0.v_mcu_h", "op0.thresh", "op0.status"}
     for name, lbl in output_labels(w).items():
-        if name not in independent:
+        if name.startswith("rs."):
+            assert text(lbl) == "no R_s", (name, text(lbl))    # R_s blank
+        elif name not in independent:
             assert text(lbl) in (NEEDS_INPUT, "n/a (see note)"), (name, text(lbl))
     assert not w.plot.has_curves
     assert "Plot needs input" in w.plot.message
@@ -443,10 +445,75 @@ def test_source_impedance_label_renamed(w):
     assert "ADC Source Impedance (R1∥R2)" not in labels
 
 
-def test_solver_warning_visible(w):
+def test_low_value_divider_converges_without_warning(w):
+    """Rewritten: R1 = R2 = 100 ohm used to show "did not settle"; the
+    bisection solver converges there."""
     load_reference(w)
     type_into(w, "r1.value", "100")
     type_into(w, "r1.unit", OHM)
     type_into(w, "r2.value", "100")
     type_into(w, "r2.unit", OHM)
+    assert "did not settle" not in text(w.banner)
+    assert text(w.components_tab.vclamp_typ) == f"{28.375 / 2.7:.3f}"
+
+
+def test_solver_warning_visible(w, monkeypatch):
+    """The warning is still shown when bracketing fails."""
+    from src.models import circuit_model
+    real = circuit_model.solve_node_voltage
+    monkeypatch.setattr(circuit_model, "solve_node_voltage",
+                        lambda *a, **k: circuit_model.SolveResult(real(*a, **k).v_node, False))
+    load_reference(w)
     assert "did not settle" in text(w.banner)
+
+
+# ── Follow-up: injection estimate, power typical / worst, R_s row, ZZK ────────
+
+def test_injection_row_is_an_estimate_and_zero_for_reference(w):
+    load_reference(w)
+    labels = set(all_label_texts(w))
+    assert "Injection Current (estimate)" in labels
+    assert "Estimate (approx.)" in labels
+    assert text(w.safety_tab.inj_row["value"]) == "0.00 mA"
+    assert text(w.safety_tab.inj_row["status"]) == "✓ OK"
+
+
+def test_power_typical_and_worst_shown(w):
+    load_reference(w)
+    r = w.app_state.result
+    c = w.components_tab
+    for row, name in ((c.r1_row, "r1"), (c.r2_row, "r2"), (c.z_row, "z")):
+        assert text(row["power"]) == f"{getattr(r, f'p_{name}_mw'):.1f} mW"
+        assert text(row["power_worst"]) == f"{getattr(r, f'p_{name}_worst_mw'):.1f} mW"
+        assert text(row["margin_worst"]) != NEEDS_INPUT
+    assert text(c.r1_row["power_worst"]) == "73.7 mW"
+    for lbl in c.rs_row.values():
+        assert text(lbl) == "no R_s"
+
+
+def test_rs_row_needs_and_shows_values(w):
+    load_reference(w)
+    type_into(w, "rs.value", "100")
+    rs = w.components_tab.rs_row
+    assert text(rs["power_worst"]) == NEEDS_INPUT and text(rs["rating"]) == NEEDS_INPUT
+    assert "R_s power rating" in text(w.banner) and "R_s tolerance" in text(w.banner)
+    assert "Also blank" not in text(w.banner)
+    type_into(w, "rs.rating", "250")
+    type_into(w, "rs.tol", "1")
+    assert text(rs["power_worst"]) == "0.0 mW"
+    assert text(rs["rating"]) == "250 mW"
+    assert text(rs["margin_worst"]) == "✓ 100%"
+    assert text(w.banner) == "All inputs present."
+
+
+def test_blank_rating_margin_shows_needs_input(w):
+    load_reference(w)
+    type_into(w, "r1.rating", "")
+    assert text(w.components_tab.r1_row["margin"]) == NEEDS_INPUT
+    assert text(w.components_tab.r1_row["margin_worst"]) == NEEDS_INPUT
+    assert "≥" not in " ".join(all_label_texts(w.components_tab.r1_row["margin"].master))
+
+
+def test_zzk_marked_reference_only(w):
+    assert text(w.zener_panel.zzk_note) == "ZZK: reference only, not used in the calculation"
+    assert "not used in the calculation" in w.zener_panel.zzk_tooltip.text

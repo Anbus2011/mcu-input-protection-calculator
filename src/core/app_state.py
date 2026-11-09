@@ -148,7 +148,6 @@ def format_number(v) -> str:
 class InputReport:
     needs: list = field(default_factory=list)        # labels of blank fields some result needs
     problems: list = field(default_factory=list)     # "label: message"
-    unused_blank: list = field(default_factory=list) # blank, asked for, but no result uses them
     warnings: list = field(default_factory=list)     # solver warnings
 
     def lines(self) -> list:
@@ -157,8 +156,6 @@ class InputReport:
             out.append("Needs input: " + ", ".join(self.needs))
         if self.problems:
             out.append("Fix: " + "; ".join(self.problems))
-        if self.unused_blank:
-            out.append("Also blank (no result uses them yet): " + ", ".join(self.unused_blank))
         out.extend(self.warnings)
         return out
 
@@ -469,6 +466,9 @@ class AppState:
             r2_tol_pct=simple("resistors.r2_tol_pct", "r2.tol"),
             r1_rating_mw=simple("resistors.r1_rating_mw", "r1.rating"),
             r2_rating_mw=simple("resistors.r2_rating_mw", "r2.rating"),
+            # The model asks for these only when R_s > 0
+            rs_tol_pct=simple("resistors.rs_tol_pct", "rs.tol"),
+            rs_rating_mw=simple("resistors.rs_rating_mw", "rs.rating"),
         )
         self.zener = ZenerParams(**{
             n: simple(f"zener.{n}", f"zener.{n}") for n, _ in ZENER_FIELD_NAMES})
@@ -479,12 +479,6 @@ class AppState:
         self._bw_inputs = {
             n: simple(f"bandwidth.{n}", f"bw.{n}") for n, _, _ in BANDWIDTH_FIELD_NAMES}
         self._causes = causes
-
-    @property
-    def rs_present(self) -> bool:
-        """True when a series resistor value greater than 0 is entered."""
-        v = self._numbers.get("rs.value")
-        return v is not None and v > 0
 
     # ── Recalculate ───────────────────────────────────────────────────────
 
@@ -557,9 +551,6 @@ class AppState:
         rep.needs = [FIELDS[k].label for k in needed if k not in self._problems]
         rep.problems = [f"{FIELDS[k].label}: {msg}" for k, msg in
                         sorted(self._problems.items(), key=lambda kv: order[kv[0]])]
-        if self.rs_present:
-            rep.unused_blank = [FIELDS[k].label for k in ("rs.rating", "rs.tol")
-                                if self.fields[k].strip() == ""]
         rep.warnings = list(self.result.warnings)
         self.report = rep
 

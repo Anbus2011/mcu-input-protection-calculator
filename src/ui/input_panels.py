@@ -21,6 +21,10 @@ if TYPE_CHECKING:
 UNIT_CHOICES = list(RESISTOR_UNITS.keys())
 NEEDS_INPUT = "needs input"
 MUTED = "gray60"
+ZZK_NOTE = "ZZK: reference only, not used in the calculation"
+ZZK_TOOLTIP = ("ZZK (dynamic impedance at IZK) is reference only and is not "
+               "used in the calculation. The Zener V-I model uses VZ, IZT, IZK "
+               "and ZZT; you can leave ZZK blank.")
 
 
 # ── Tooltip Helper ────────────────────────────────────────────────────────────
@@ -213,6 +217,17 @@ class ZenerPanel(_FieldPanel):
         ctk.CTkLabel(r3, text="Ω typ", width=UNT).pack(side="left")
         self._entry(r3, "zener.zzk_max", ENT).pack(side="left", padx=2)
         ctk.CTkLabel(r3, text="Ω max", width=UNT).pack(side="left")
+
+        r3n = row()
+        ctk.CTkLabel(r3n, text="", width=LBL).pack(side="left")
+        self.zzk_note = ctk.CTkLabel(r3n, text=ZZK_NOTE, text_color=MUTED, font=("", 11))
+        self.zzk_note.pack(side="left")
+        btn = ctk.CTkLabel(r3n, text="?", width=18, height=18,
+                           fg_color=("gray75", "gray35"), corner_radius=9,
+                           font=("", 11, "bold"), text_color=("gray30", "gray80"),
+                           cursor="hand2")
+        btn.pack(side="left", padx=(4, 0))
+        self.zzk_tooltip = _Tooltip(btn, ZZK_TOOLTIP)
 
         r4 = row()
         ctk.CTkLabel(r4, text="Ptot:", width=LBL).pack(side="left")

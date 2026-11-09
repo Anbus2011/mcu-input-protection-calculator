@@ -16,6 +16,7 @@ from src.ui.input_panels import _Tooltip, NEEDS_INPUT, MUTED
 LEVEL_COLORS = {PASS: "green", WARN: "orange", FAIL: "red", INFO: MUTED}
 NORMAL = ("gray10", "gray90")
 BLOCKED = "n/a (see note)"
+NO_RS = "no R_s"
 
 
 def _show(label, value, fmt: str = "{:.2f}", suffix: str = ""):
@@ -96,16 +97,32 @@ class ComponentsTab:
         self.r_total = _table_row(dt, "Input Impedance (R1+R2)", "kΩ", 1, cw)
         self.ratio = _table_row(dt, "Divider Ratio", "", 2, cw)
         self.r_source = _table_row(dt, "ADC Source Impedance (R1∥R2 + R_s)", "kΩ", 3, cw)
-        self.p_total = _table_row(dt, "Power Dissipation", "mW", 4, cw)
+        self.p_total = _table_row(dt, "Power Dissipation (typical)", "mW", 4, cw)
 
         ctk.CTkLabel(parent, text="Component Power (at Max Input)", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
         ct = ctk.CTkFrame(parent, fg_color="transparent"); ct.pack(fill="x", padx=10)
-        ccw = [80, 90, 90, 100, 150]
-        _table_header(ct, ["Component", "Current", "Power", "Power Rating", "Margin %"], ccw)
-        keys = ["current", "power", "rating", "margin"]
-        self.r1_row = _cells_row(ct, "R1", 1, ccw, keys, {"margin"})
-        self.r2_row = _cells_row(ct, "R2", 2, ccw, keys, {"margin"})
-        self.z_row = _cells_row(ct, "Zener", 3, ccw, keys, {"margin"})
+        ccw = [70, 90, 85, 85, 85, 95, 95]
+        tips = [
+            None,
+            "Typical current: nominal resistors, typical Zener.\n"
+            "R_s: estimated injection current at the typical node voltage.",
+            "Typical: nominal resistors, typical Zener (VZ nom).",
+            "Worst case: the highest power over the corners R1 min/max × "
+            "R2 min/max × Zener at VZ min (low-voltage corner) / VZ max "
+            "(high-voltage corner), and the typical point.\n"
+            "R_s: worst-case node voltage (V_mcuH), R_s over its tolerance.",
+            None,
+            "Rating margin against the typical power.",
+            "Rating margin against the worst-case power.",
+        ]
+        _table_header(ct, ["Part", "Current", "Power typ", "Power worst", "Rating",
+                           "Margin typ", "Margin worst"], ccw, tips)
+        keys = ["current", "power", "power_worst", "rating", "margin", "margin_worst"]
+        bold = {"margin", "margin_worst"}
+        self.r1_row = _cells_row(ct, "R1", 1, ccw, keys, bold)
+        self.r2_row = _cells_row(ct, "R2", 2, ccw, keys, bold)
+        self.z_row = _cells_row(ct, "Zener", 3, ccw, keys, bold)
+        self.rs_row = _cells_row(ct, "R_s", 4, ccw, keys, bold)
 
         ctk.CTkLabel(parent, text="Voltage at MCU Pin", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
         vt = ctk.CTkFrame(parent, fg_color="transparent"); vt.pack(fill="x", padx=10)
@@ -120,14 +137,21 @@ class ComponentsTab:
         _show(self.r_source, None if r.r_source_ohms is None else r.r_source_ohms / 1000)
         _show(self.p_total, r.p_total_mw, "{:.1f}")
 
-        for row, i, p, rating, status in (
-                (self.r1_row, r.i_r1_ma, r.p_r1_mw, r.r1_rating_mw, r.r1_margin_status),
-                (self.r2_row, r.i_r2_ma, r.p_r2_mw, r.r2_rating_mw, r.r2_margin_status),
-                (self.z_row, r.i_z_ma, r.p_z_mw, r.z_ptot_mw, r.z_margin_status)):
+        rows = [(self.r1_row, "r1", r.i_r1_ma, r.r1_rating_mw),
+                (self.r2_row, "r2", r.i_r2_ma, r.r2_rating_mw),
+                (self.z_row, "z", r.i_z_ma, r.z_ptot_mw)]
+        if r.has_rs:
+            rows.append((self.rs_row, "rs", r.i_rs_ma, r.rs_rating_mw))
+        else:
+            for lbl in self.rs_row.values():
+                lbl.configure(text=NO_RS, text_color=MUTED)
+        for row, name, i, rating in rows:
             _show(row["current"], i, "{:.2f}", " mA")
-            _show(row["power"], p, "{:.1f}", " mW")
+            _show(row["power"], getattr(r, f"p_{name}_mw"), "{:.1f}", " mW")
+            _show(row["power_worst"], getattr(r, f"p_{name}_worst_mw"), "{:.1f}", " mW")
             _show(row["rating"], rating, "{:.0f}", " mW")
-            _show_status(row["margin"], status)
+            _show_status(row["margin"], getattr(r, f"{name}_margin_status"))
+            _show_status(row["margin_worst"], getattr(r, f"{name}_margin_worst_status"))
 
         _show(self.vclamp_typ, r.v_mcu_typ, "{:.3f}")
         _show(self.vclamp_worst, r.v_mcu_worst_zener, "{:.3f}")
@@ -155,17 +179,23 @@ class SafetyTab:
         self.rec_row = _cells_row(vt, "vs Safe Max", 1, vw, keys, {"status"})
         self.abs_row = _cells_row(vt, "vs Absolute Max", 2, vw, keys, {"status"})
 
-        ctk.CTkLabel(parent, text="Injection Current", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
+        ctk.CTkLabel(parent, text="Injection Current (estimate)", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
         it = ctk.CTkFrame(parent, fg_color="transparent"); it.pack(fill="x", padx=10)
         iw = [150, 90, 90, 100]
         it_tips = [
             None,
-            "Estimated current flowing into the MCU's\ninternal ESD clamp diode when V_mcu exceeds VDD.\nI_inj = (V_mcu - VDD) / (R_series + ~100Ω internal).",
+            "Estimate of the current into the MCU's internal ESD clamp\n"
+            "once the worst-case pin voltage passes VDD + 0.3 V:\n"
+            "I_inj = max(0, V_mcu − (VDD + 0.3 V)) / (R_s min + 100 Ω).\n"
+            "R_s min = R_s at its low tolerance; 100 Ω stands for the\n"
+            "internal ESD path. Rough model only: on STM32G4 FT/TT pins\n"
+            "positive injection is not possible at all (DS12983 Rev 5,\n"
+            "Table 15, note 3).",
             "Maximum safe injection current from the\nMCU datasheet (absolute max rating).",
             "OK = well within limit.\nMARGINAL = approaching limit.\nHIGH = exceeds safe injection current.",
         ]
         _table_header(it, ["Parameter", "Value", "Limit", "Status"], iw, it_tips)
-        self.inj_row = _cells_row(it, "Estimated", 1, iw, ["value", "limit", "status"], {"status"})
+        self.inj_row = _cells_row(it, "Estimate (approx.)", 1, iw, ["value", "limit", "status"], {"status"})
 
         ctk.CTkLabel(parent, text="ADC Performance", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
         at = ctk.CTkFrame(parent, fg_color="transparent"); at.pack(fill="x", padx=10)

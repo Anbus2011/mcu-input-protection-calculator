@@ -46,6 +46,9 @@ class ResistorParams:
     r2_tol_pct: Optional[float] = None
     r1_rating_mw: Optional[float] = None
     r2_rating_mw: Optional[float] = None
+    # Used only when rs_ohms > 0
+    rs_tol_pct: Optional[float] = None
+    rs_rating_mw: Optional[float] = None
 
 
 @dataclass
@@ -89,6 +92,19 @@ class CalculationResult:
     p_r2_mw: Optional[float] = None
     p_z_mw: Optional[float] = None
 
+    # Series resistor (only when R_s > 0). has_rs is False for R_s blank or 0.
+    has_rs: bool = False
+    i_rs_ma: Optional[float] = None          # typical: typical node, nominal R_s
+    p_rs_mw: Optional[float] = None
+
+    # Worst-case power at max input: maximum over the corners (see calculate_all)
+    p_r1_worst_mw: Optional[float] = None
+    p_r2_worst_mw: Optional[float] = None
+    p_z_worst_mw: Optional[float] = None
+    p_rs_worst_mw: Optional[float] = None
+    # part -> corner description giving that maximum
+    worst_power_corner: dict = field(default_factory=dict)
+
     # Clamp voltages at max input (nominal resistors)
     v_mcu_typ: Optional[float] = None
     v_mcu_worst_zener: Optional[float] = None
@@ -123,12 +139,24 @@ class CalculationResult:
     r1_margin_pct: Optional[float] = None
     r2_margin_pct: Optional[float] = None
     z_margin_pct: Optional[float] = None
+    rs_margin_pct: Optional[float] = None
     r1_margin_status: Optional[tuple] = None
     r2_margin_status: Optional[tuple] = None
     z_margin_status: Optional[tuple] = None
+    rs_margin_status: Optional[tuple] = None
+    # Same margins against the worst-case power
+    r1_margin_worst_pct: Optional[float] = None
+    r2_margin_worst_pct: Optional[float] = None
+    z_margin_worst_pct: Optional[float] = None
+    rs_margin_worst_pct: Optional[float] = None
+    r1_margin_worst_status: Optional[tuple] = None
+    r2_margin_worst_status: Optional[tuple] = None
+    z_margin_worst_status: Optional[tuple] = None
+    rs_margin_worst_status: Optional[tuple] = None
     r1_rating_mw: Optional[float] = None
     r2_rating_mw: Optional[float] = None
     z_ptot_mw: Optional[float] = None
+    rs_rating_mw: Optional[float] = None
 
     # output key -> list of missing input names ("resistors.r1_ohms", ...)
     missing: dict = field(default_factory=dict)
@@ -138,28 +166,45 @@ class CalculationResult:
 
 # ── Zener voltage model ──────────────────────────────────────────────────────
 
+ZENER_TYP, ZENER_WORST, ZENER_LOW = "typ", "worst", "low"
+
+
+def _zener_curve(zener: ZenerParams, corner) -> tuple:
+    """(VZ at IZT, VZ knee at IZK, ZZT, ZZK) for a Zener corner.
+
+    typ:   VZ nom, knee 0.94 x VZ nom, ZZT typ   (CLAUDE.md §4B)
+    worst: VZ max, knee 0.97 x VZ max, ZZT max   (CLAUDE.md §4B)
+    low:   VZ min, knee 0.94 x VZ min, ZZT typ   (lowest curve: used only for
+           the low-voltage worst-case power corner)
+    ZZK is returned for reference only; it does not change the voltage.
+    """
+    if corner is True:
+        corner = ZENER_WORST
+    elif corner is False or corner is None:
+        corner = ZENER_TYP
+    if corner == ZENER_WORST:
+        return zener.vz_max, zener.vz_max * 0.97, zener.zzt_max, zener.zzk_max
+    if corner == ZENER_LOW:
+        return zener.vz_min, zener.vz_min * 0.94, zener.zzt_typ, zener.zzk_typ
+    return zener.vz_nom, zener.vz_nom * 0.94, zener.zzt_typ, zener.zzk_typ
+
+
 def calculate_zener_voltage(iz_ma: float, zener: ZenerParams,
-                            use_worst_case: bool = False) -> tuple:
+                            use_worst_case=False) -> tuple:
     """
     Calculate Zener clamp voltage at a given current.
     Returns (v_clamp, r_differential). r_differential is None when the ZZK
-    input it needs is blank.
+    input it needs is blank. ZZK only feeds r_differential, which no result
+    uses: it is reference only.
+
+    *use_worst_case*: False/"typ", True/"worst" or "low" (see _zener_curve).
 
     Three-region model:
       - Below IZK: soft breakdown, V ~ 0.97-1.0 x VZ_knee
       - IZK to IZT: linear interpolation VZ_knee -> VZ_nom
       - Above IZT: extrapolate with ZZT slope
     """
-    if use_worst_case:
-        vz_at_izt = zener.vz_max
-        vz_at_izk = zener.vz_max * 0.97
-        zzt = zener.zzt_max
-        zzk = zener.zzk_max
-    else:
-        vz_at_izt = zener.vz_nom
-        vz_at_izk = zener.vz_nom * 0.94
-        zzt = zener.zzt_typ
-        zzk = zener.zzk_typ
+    vz_at_izt, vz_at_izk, zzt, zzk = _zener_curve(zener, use_worst_case)
 
     izt = zener.izt_ma
     izk = zener.izk_ma
@@ -181,10 +226,11 @@ def calculate_zener_voltage(iz_ma: float, zener: ZenerParams,
     return v_clamp, rdif
 
 
-# ── Iterative solver (the only copy) ─────────────────────────────────────────
+# ── Node solver (the only copy) ──────────────────────────────────────────────
 
-SOLVER_ITERATIONS = 15
-SOLVER_SETTLE_V = 1e-3   # last step must move the node by no more than 1 mV
+SOLVER_TOLERANCE_V = 1e-6     # bisection stops when the bracket is 1 µV wide
+SOLVER_MAX_ITERATIONS = 200   # 30 V / 2^200 is far below 1 µV; a guard only
+IZ_CLAMP_MIN_MA = 0.5         # CLAUDE.md §4B: below this the clamp is ineffective
 
 
 @dataclass
@@ -194,44 +240,62 @@ class SolveResult:
 
 
 def solve_node_voltage(vin: float, r1: float, r2: float,
-                       zener: ZenerParams, use_worst_zener: bool) -> SolveResult:
+                       zener: ZenerParams, corner) -> SolveResult:
     """Solve the MCU node voltage at *vin* (CLAUDE.md §4B).
 
-    15 iterations of V = 0.3 V + 0.7 V_clamp, starting from VZ. If IZ falls
-    below 0.5 mA the clamp is ineffective and the result is capped at VZ.
+    *corner* picks the Zener V-I curve: False/"typ" (typical), True/"worst"
+    (VZ max) or "low" (VZ min, used only for worst-case power).
 
-    ``settled`` is False when the iteration did not settle: the last step
-    moved the node by more than 1 mV, or the unclamped iterate left the
-    physical range [0, V_divider]. The returned voltage is then not reliable.
+    The node voltage V satisfies V = V_clamp(I_Z(V)) with
+    I_Z(V) = (vin - V)/R1 - V/R2. h(V) = V - V_clamp(I_Z(V)) is strictly
+    increasing (V_clamp never decreases with I_Z, and I_Z falls as V rises),
+    negative at V = 0 and positive just below the unclamped divider voltage,
+    so bisection on [0, V_divider] finds the single root. It stops when the
+    bracket is 1 µV wide.
+
+    If I_Z at the root is below 0.5 mA the clamp is ineffective and the result
+    is capped at VZ (CLAUDE.md §4B). This rule makes the curve step by about
+    0.2 V where I_Z crosses 0.5 mA; the solver lands on either side of it.
+
+    ``settled`` is False when the bracket has no sign change or the bisection
+    did not narrow to 1 µV; the returned voltage (V_divider) is then not
+    reliable.
     """
+    vz_ref, vz_knee, _, _ = _zener_curve(zener, corner)
     v_div = vin * r2 / (r1 + r2)
-    vz_ref = zener.vz_max if use_worst_zener else zener.vz_nom
-    vz_knee = vz_ref * (0.97 if use_worst_zener else 0.94)
 
     if v_div < vz_knee:
         return SolveResult(v_div, True)
 
-    v_node = vz_ref
-    final_iz = 0.0
-    last_step = 0.0
-    for i in range(SOLVER_ITERATIONS):
-        i_r1 = (vin - v_node) / r1 * 1000
-        i_r2 = v_node / r2 * 1000
-        i_z = i_r1 - i_r2
-        if i_z > 0:
-            final_iz = i_z
-            v_clamp, _ = calculate_zener_voltage(i_z, zener, use_worst_zener)
-            new_v = v_node * 0.3 + v_clamp * 0.7
-            last_step = new_v - v_node
-            v_node = new_v
+    def i_zener(v):
+        return (vin - v) / r1 * 1000 - v / r2 * 1000
+
+    def h(v):
+        v_clamp, _ = calculate_zener_voltage(i_zener(v), zener, corner)
+        return v - v_clamp
+
+    lo, hi = 0.0, v_div
+    h_lo = h(lo)
+    # Upper end just below V_divider, where I_Z is a hair above 0
+    h_hi = h(hi * (1 - 1e-12))
+    if not (h_lo < 0 < h_hi):
+        return SolveResult(v_div, False)
+
+    settled = False
+    for _ in range(SOLVER_MAX_ITERATIONS):
+        mid = 0.5 * (lo + hi)
+        if h(mid) < 0:
+            lo = mid
         else:
-            # On the first pass this means the divider never reaches VZ (no
-            # clamping). Later, it means the iterate overshot above V_divider.
-            return SolveResult(v_div, i == 0)
+            hi = mid
+        if hi - lo <= SOLVER_TOLERANCE_V:
+            settled = True
+            break
+    v_node = 0.5 * (lo + hi)
+    if not math.isfinite(v_node):
+        return SolveResult(v_div, False)
 
-    settled = abs(last_step) <= SOLVER_SETTLE_V and 0.0 <= v_node <= v_div
-
-    if final_iz < 0.5:
+    if i_zener(v_node) < IZ_CLAMP_MIN_MA:
         return SolveResult(min(v_div, vz_ref), settled)
 
     return SolveResult(max(vz_knee, min(v_div, v_node)), settled)
@@ -313,7 +377,10 @@ def _clean_inputs(resistors, zener, mcu, system) -> dict:
         "resistors.r2_tol_pct": _tolerance(resistors.r2_tol_pct),
         "resistors.r1_rating_mw": _positive(resistors.r1_rating_mw),
         "resistors.r2_rating_mw": _positive(resistors.r2_rating_mw),
+        "resistors.rs_tol_pct": _tolerance(resistors.rs_tol_pct),
+        "resistors.rs_rating_mw": _positive(resistors.rs_rating_mw),
         "zener.vz_nom": _positive(zener.vz_nom),
+        "zener.vz_min": _positive(zener.vz_min),
         "zener.vz_max": _positive(zener.vz_max),
         "zener.izt_ma": _positive(zener.izt_ma),
         "zener.izk_ma": _positive(zener.izk_ma),
@@ -350,8 +417,22 @@ R1, R2, RS = "resistors.r1_ohms", "resistors.r2_ohms", "resistors.rs_ohms"
 T1, T2 = "resistors.r1_tol_pct", "resistors.r2_tol_pct"
 Z_TYP = ("zener.vz_nom", "zener.izt_ma", "zener.izk_ma", "zener.zzt_typ")
 Z_WC = ("zener.vz_max", "zener.izt_ma", "zener.izk_ma", "zener.zzt_max")
+Z_LOW = ("zener.vz_min", "zener.izt_ma", "zener.izk_ma", "zener.zzt_typ")
+RST, RS_RATING = "resistors.rs_tol_pct", "resistors.rs_rating_mw"
 VDD = "mcu.vdd"
 VIN = "system.v_input_max"
+
+# Injection starts at VDD + 0.3 V (the Safe Max threshold of CLAUDE.md §4D);
+# 100 ohm stands for the internal ESD path resistance.
+INJECTION_ONSET_ABOVE_VDD_V = 0.3
+ESD_INTERNAL_OHMS = 100.0
+
+
+def injection_current_ma(v_node: float, vdd: float, rs_ohms: float) -> float:
+    """Estimated injection current (mA): max(0, V - (VDD + 0.3)) / (R_s + 100).
+    Callers pass R_s at its low tolerance for the worst case."""
+    over = v_node - (vdd + INJECTION_ONSET_ABOVE_VDD_V)
+    return max(0.0, over) / (rs_ohms + ESD_INTERNAL_OHMS) * 1000
 
 PLOT_POINTS = 200
 
@@ -380,7 +461,7 @@ def calculate_all(resistors: ResistorParams, zener: ZenerParams,
 
     # Zener with cleaned values (only fields the solver uses are read)
     z = ZenerParams(
-        vz_nom=inp["zener.vz_nom"], vz_min=zener.vz_min, vz_max=inp["zener.vz_max"],
+        vz_nom=inp["zener.vz_nom"], vz_min=inp["zener.vz_min"], vz_max=inp["zener.vz_max"],
         izt_ma=inp["zener.izt_ma"], izk_ma=inp["zener.izk_ma"],
         zzt_typ=inp["zener.zzt_typ"], zzt_max=inp["zener.zzt_max"],
         zzk_typ=_finite(zener.zzk_typ), zzk_max=_finite(zener.zzk_max),
@@ -442,38 +523,94 @@ def calculate_all(resistors: ResistorParams, zener: ZenerParams,
         res.v_mcu_worst_zener = solve(vin_max, r1, r2, True,
                                       f"max input {vin_max:g} V (worst Zener)")
 
-    # Power rating margins
-    res.r1_rating_mw = inp["resistors.r1_rating_mw"]
-    res.r2_rating_mw = inp["resistors.r2_rating_mw"]
-    res.z_ptot_mw = inp["zener.ptot_mw"]
-    for name, rating, power in (
-            ("r1", "resistors.r1_rating_mw", "p_r1_mw"),
-            ("r2", "resistors.r2_rating_mw", "p_r2_mw"),
-            ("z", "zener.ptot_mw", "p_z_mw")):
-        p = getattr(res, power)
-        if need(f"{name}_margin", rating, deps=("typ_at_max",)):
-            pct = (inp[rating] - p) / inp[rating] * 100
-            setattr(res, f"{name}_margin_pct", pct)
-            setattr(res, f"{name}_margin_status", _margin_status(pct))
-        elif p is not None:
-            # Power is known; only the rating is blank. Show what is needed.
-            setattr(res, f"{name}_margin_status",
-                    (f"needs input (≥{p * 1.5:.0f} mW)", INFO))
-
     # True worst case at max input
     if need("v_mcu_worst", VIN, *Z_WC, deps=("tolerance",)):
         res.v_mcu_worst = v_high(vin_max, f"max input {vin_max:g} V")
+
+    # Series resistor. R_s = 0 means there is none and nothing is asked for.
+    res.has_rs = rs is None or rs > 0
+    rs_paths = (RS, RST) if res.has_rs else (RS,)
+    rs_min = None
+    if res.has_rs and inp[RS] is not None and inp[RST] is not None:
+        rs_min = rs * (1 - inp[RST] / 100)
+        rs_max = rs * (1 + inp[RST] / 100)
+    elif not res.has_rs:
+        rs_min = 0.0
+
+    if res.has_rs:
+        if need("p_rs", RS, VDD, deps=("typ_at_max",)):
+            res.i_rs_ma = injection_current_ma(res.v_mcu_typ, vdd, rs)
+            res.p_rs_mw = (res.i_rs_ma / 1000) ** 2 * rs * 1000
+        if need("p_rs_worst", RS, RST, VDD, deps=("v_mcu_worst",)):
+            # P(R) = I(R)^2 R with I = dV/(R + 100) peaks at R = 100 ohm, so
+            # the maximum over [R_s min, R_s max] is at an end or at 100 ohm.
+            cands = [rs_min, rs_max]
+            if rs_min < ESD_INTERNAL_OHMS < rs_max:
+                cands.append(ESD_INTERNAL_OHMS)
+            best = max(cands, key=lambda R: injection_current_ma(
+                res.v_mcu_worst, vdd, R) ** 2 * R)
+            i = injection_current_ma(res.v_mcu_worst, vdd, best)
+            res.p_rs_worst_mw = (i / 1000) ** 2 * best * 1000
+            res.worst_power_corner["rs"] = (
+                f"V_mcuH {res.v_mcu_worst:.3f} V, R_s {best:g} Ω")
+
+    # Worst-case power at max input. Corners: R1 min/max x R2 min/max x
+    # Zener low (VZ min curve) / high (VZ max curve); the typical point is
+    # included too, since it lies inside the same range. Each part reports
+    # its own maximum.
+    if need("power_worst", VIN, *Z_LOW, *Z_WC, deps=("tolerance", "typ_at_max")):
+        best = {"r1": (res.p_r1_mw, "typical"), "r2": (res.p_r2_mw, "typical"),
+                "z": (res.p_z_mw, "typical")}
+        for r1_name, ra in (("R1 min", r1_min), ("R1 max", r1_max)):
+            for r2_name, rb in (("R2 min", r2_min), ("R2 max", r2_max)):
+                for z_name, zc in (("VZ min", ZENER_LOW), ("VZ max", ZENER_WORST)):
+                    corner = f"{r1_name}, {r2_name}, {z_name}"
+                    v = solve(vin_max, ra, rb, zc,
+                              f"max input {vin_max:g} V (power corner {corner})")
+                    i_ra = (vin_max - v) / ra * 1000
+                    i_rb = v / rb * 1000
+                    i_z = max(0.0, i_ra - i_rb)
+                    for part, p in (("r1", (i_ra / 1000) ** 2 * ra * 1000),
+                                    ("r2", (i_rb / 1000) ** 2 * rb * 1000),
+                                    ("z", v * i_z)):
+                        if p > best[part][0]:
+                            best[part] = (p, corner)
+        res.p_r1_worst_mw, res.p_r2_worst_mw, res.p_z_worst_mw = (
+            best["r1"][0], best["r2"][0], best["z"][0])
+        for part in ("r1", "r2", "z"):
+            res.worst_power_corner[part] = best[part][1]
+    for k in ("p_r1_worst", "p_r2_worst", "p_z_worst"):
+        need(k, deps=("power_worst",))
+
+    # Power rating margins: typical and worst-case. A blank rating shows
+    # "needs input" (no hint value).
+    res.r1_rating_mw = inp["resistors.r1_rating_mw"]
+    res.r2_rating_mw = inp["resistors.r2_rating_mw"]
+    res.z_ptot_mw = inp["zener.ptot_mw"]
+    res.rs_rating_mw = inp[RS_RATING] if res.has_rs else None
+    parts = [("r1", "resistors.r1_rating_mw", "typ_at_max", "p_r1_worst"),
+             ("r2", "resistors.r2_rating_mw", "typ_at_max", "p_r2_worst"),
+             ("z", "zener.ptot_mw", "typ_at_max", "p_z_worst")]
+    if res.has_rs:
+        parts.append(("rs", RS_RATING, "p_rs", "p_rs_worst"))
+    for name, rating, typ_dep, worst_dep in parts:
+        for suffix, power, dep in (("", f"p_{name}_mw", typ_dep),
+                                   ("_worst", f"p_{name}_worst_mw", worst_dep)):
+            if need(f"{name}_margin{suffix}", rating, deps=(dep,)):
+                p = getattr(res, power)
+                pct = (inp[rating] - p) / inp[rating] * 100
+                setattr(res, f"{name}_margin{suffix}_pct", pct)
+                setattr(res, f"{name}_margin{suffix}_status", _margin_status(pct))
+
     if need("margin_rec", "mcu.v_recommended_max", deps=("v_mcu_worst",)):
         res.margin_rec_v = v_rec_max - res.v_mcu_worst
         res.rec_status = _voltage_status(res.margin_rec_v, 0.05)
     if need("margin_abs", "mcu.v_absolute_max", deps=("v_mcu_worst",)):
         res.margin_abs_v = v_abs_max - res.v_mcu_worst
         res.abs_status = _voltage_status(res.margin_abs_v, 0.1)
-    if need("injection", VDD, RS, deps=("v_mcu_worst",)):
-        if res.v_mcu_worst > vdd:
-            res.i_injection_ma = (res.v_mcu_worst - vdd) / (rs + 100) * 1000
-        else:
-            res.i_injection_ma = 0.0
+    # Injection estimate: worst-case node, R_s at its low tolerance
+    if need("injection", VDD, *rs_paths, deps=("v_mcu_worst",)):
+        res.i_injection_ma = injection_current_ma(res.v_mcu_worst, vdd, rs_min)
     if need("inj_status", "mcu.safe_injection_ma", deps=("injection",)):
         res.inj_status = _injection_status(res.i_injection_ma,
                                            inp["mcu.safe_injection_ma"])
@@ -565,7 +702,8 @@ def calculate_all(resistors: ResistorParams, zener: ZenerParams,
             if w not in seen:
                 seen.append(w)
         res.warnings.append(
-            "Zener solver did not settle (last step > 1 mV or outside 0..V_divider) at: "
+            "Zener solver did not settle (bisection could not bracket the node "
+            "voltage between 0 V and V_divider) at: "
             + "; ".join(seen) + ". Those voltages are not reliable.")
 
     return res
