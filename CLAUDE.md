@@ -50,6 +50,7 @@ The Zener clamp is solved numerically due to its non-linear V-I curve.
   * Worst case, per part: the maximum over the corners R1 {min, max} × R2 {min, max} × Zener {low: VZ_min curve, high: VZ_max curve} (8 corners), plus the typical point.
   * R_s worst case: node at V_mcuH; $P = I^2 R$ with $I = \frac{V_{mcuH} - (VDD + 0.3)}{R + 100}$, maximised over R in [R_s min, R_s max]. The maximum is at an end of the band, or at 100 Ω if it lies inside.
   * Margins: (rating − power) / rating, shown against both typical and worst-case power. A blank rating shows "needs input" (no hint value). R_s blank or 0: the R_s row shows "no R_s" and nothing is asked for.
+  * Verdict: the worst-case margin is the verdict for each part (R1, R2, Zener, R_s); the typical margin is shown for information only. Thresholds: PASS > 20 %, TIGHT 0–20 %, FAIL ≤ 0 %. The overall "Power verdict (worst case)" is FAIL if any part fails, TIGHT if any is tight, otherwise PASS, or "needs input" if any rating is blank.
 
 ### C. Signal Bandwidth and PPS Analysis (AC Model)
 The protection network forms an RC low-pass filter. 
