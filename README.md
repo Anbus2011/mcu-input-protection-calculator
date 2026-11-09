@@ -131,7 +131,7 @@ Enter values for R1, R2, and the optional R_series. Each resistor has:
 - **Power rating** (mW) - used to calculate margin percentage
 - **Tolerance** (%) - used for worst-case analysis
 
-R_series blank or 0 means there is no series resistor; its unit, rating and tolerance are then not needed. When R_series is above 0 the report line also mentions a blank R_s rating or tolerance (no result uses them yet).
+R_series blank or 0 means there is no series resistor; its unit, rating and tolerance are then not needed, and the R_s row of the power table shows "no R_s". When R_series is above 0 all three are needed: the rating for the R_s power margins, the tolerance for the worst-case R_s power and for the injection estimate (which uses R_s at its low tolerance).
 
 #### Zener Diode
 
@@ -149,7 +149,7 @@ Select a preset from the dropdown. The BZB984 series presets (Nexperia BZB984 da
 | BZB984-C5V6 | 5.6V |
 | BZB984-C6V2 | 6.2V |
 
-Each preset fills: VZ (nom/min/max), IZT, IZK, ZZT (typ/max), ZZK (typ/max), and Ptot. As soon as any value differs from the preset, the selector shows **Custom** with "modified from <preset>", and the design is saved as `"preset": "Custom"` with `"preset_base": "<preset>"`. Changing the value back shows the preset again. Choosing **Custom** keeps the values that are in the fields.
+Each preset fills: VZ (nom/min/max), IZT, IZK, ZZT (typ/max), ZZK (typ/max), and Ptot. ZZK is **reference only, not used in the calculation** (the panel says so); it can be left blank. VZ min is used only for the worst-case power (low-voltage corner). As soon as any value differs from the preset, the selector shows **Custom** with "modified from <preset>", and the design is saved as `"preset": "Custom"` with `"preset_base": "<preset>"`. Changing the value back shows the preset again. Choosing **Custom** keeps the values that are in the fields.
 
 #### MCU Pin Input Limits
 
@@ -180,9 +180,16 @@ Free-form text area for annotations. Saved with the `.div` file.
 
 #### Tab 1: Component Analysis
 
-- **Divider Network** - input impedance, divider ratio, ADC source impedance (R1∥R2 + R_s), total power dissipation
-- **Component Power** - current, power, rating, and margin % for R1, R2, and Zener at max input
+- **Divider Network** - input impedance, divider ratio, ADC source impedance (R1∥R2 + R_s), total typical power dissipation (R1 + R2 + Zener)
+- **Component Power** - for R1, R2, the Zener and R_s at max input: typical current, typical power, worst-case power, rating, and margin % against both the typical and the worst-case power
 - **Voltage at MCU Pin** - typical and worst-case V_mcu at maximum input voltage
+
+Typical power uses nominal resistors and the typical Zener (VZ nom). Worst-case power is the highest value over these corners, taken separately for each part:
+
+- R1 at min or max tolerance x R2 at min or max tolerance x the Zener at **VZ min** (low-voltage corner: knee 0.94 x VZ min, ZZT typ) or **VZ max** (high-voltage corner: knee 0.97 x VZ max, ZZT max) - eight corners - plus the typical point;
+- R_s: the estimated injection current at the worst-case pin voltage (V_mcuH), with R_s anywhere in its tolerance band (the maximum of I^2 x R_s is at an end of the band, or at 100 Ω if that lies inside it).
+
+A blank rating shows **needs input** in both margin cells.
 
 Margin indicators:
 - **Green** (> 20% margin) - safe
@@ -192,7 +199,7 @@ Margin indicators:
 #### Tab 2: MCU Input
 
 - **Voltage Limits** - V_mcu vs Safe Max and Absolute Max with margin in mV and pass/fail status
-- **Injection Current** - estimated current into ESD clamp vs the safe limit
+- **Injection Current (estimate)** - I_inj = max(0, V_mcuH - (VDD + 0.3 V)) / (R_s min + 100 Ω), where R_s min is R_s at its low tolerance (0 when there is no R_s) and 100 Ω stands for the internal ESD path. It is a rough model: on STM32G4 FT/TT pins positive injection is not possible at all (DS12983 Rev 5, Table 15, note 3). The reference design gives 0 mA.
 - **ADC Performance** - source impedance, recommended minimum sample cycles (STM32G4), and resolution in mV/LSB (VREF / 2^N referred to the divider input)
 
 #### Tab 3: Input Levels
@@ -209,7 +216,9 @@ Operating point table showing the MCU pin voltage at five key input levels:
 
 Each row shows both **V_mcuL** (lowest, from R1 high / R2 low / typical Zener) and **V_mcuH** (highest, from R1 low / R2 high / worst Zener).
 
-If the Zener solver doesn't settle (the last iteration still moves the node by more than 1 mV, or the result leaves the physical range, which happens with very low-value dividers), the report line says so and names the input levels affected.
+The pin voltage is solved by bisection between 0 V and the unclamped divider voltage, to 1 µV, on the Zener V-I curve of CLAUDE.md §4B. Low-value dividers (for example R1 = R2 = 100 Ω) converge too. If the bisection can't bracket a solution, the report line says "did not settle" and names the input levels affected.
+
+Known limitation: §4B treats the clamp as ineffective below 0.5 mA and caps the voltage at VZ there. The curve therefore follows the divider up to VZ, stays flat at VZ, and then drops to the knee voltage where the Zener current reaches 0.5 mA: by about 0.2 V on the typical curve (3.300 V to 3.102 V at 9.75 V in for the reference 10 kΩ / 18 kΩ / BZB984-C3V3 design) and about 0.1 V on the worst-case curve (3.500 V to 3.395 V at 10.12 V in). An input level that sits right at that point can land on either side of the step.
 
 #### Tab 4: Signal Bandwidth
 
@@ -237,6 +246,11 @@ Results show four frequency limits and the effective maximum PPS:
 | Analog (practical) | 1 / (2 x t_vih) |
 | Digital sampling | 1 / (2 x (t_undefined + t_pulse_min)) |
 | Counter overflow | 2^N x f_read (unsigned), 2^(N-1) x f_read (signed) |
+
+where t_vih = tau x ln(V_high / (V_high - VIH)) is the time the rising edge takes to reach VIH from 0 V, and t_undefined is the larger of the two undefined-zone times:
+
+- rising: tau x ln((V_high - VIL) / (V_high - VIH))
+- falling (from VIH down to VIL): tau x ln(VIH / VIL)
 
 The **effective limit** is the minimum of all four, with the bottleneck identified. It is shown only when all four are known. If V_high never reaches VIH, the tab says so and shows no threshold-based or effective limit.
 
@@ -390,7 +404,7 @@ ZENER_PRESETS = {
 | `izt_ma` | "Test current" (IZT), usually 5 mA for low-power Zeners |
 | `izk_ma` | "Knee current" (IZK), typically 1 mA |
 | `zzt_typ` / `zzt_max` | "Dynamic impedance at IZT" (ZZT) |
-| `zzk_typ` / `zzk_max` | "Dynamic impedance at IZK" (ZZK) |
+| `zzk_typ` / `zzk_max` | "Dynamic impedance at IZK" (ZZK); reference only, not used in the calculation |
 | `ptot_mw` | "Total power dissipation" (Ptot) at 25 deg C |
 
 To remove a preset, delete its block from the dictionary. **Custom** is always offered in the dropdown; it is not an entry in `ZENER_PRESETS`.
@@ -470,7 +484,7 @@ BANDWIDTH_STARTING_VALUES = {
 python -m pytest tests/ -v
 ```
 
-`tests/test_ui.py` drives the real window (withdrawn), so it needs a desktop session.
+All 394 tests must pass. `tests/test_ui.py` drives the real window (withdrawn), so it needs a desktop session.
 
 ---
 
