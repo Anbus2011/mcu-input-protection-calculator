@@ -130,6 +130,7 @@ def output_labels(w):
     out = {
         "r_total": c.r_total, "ratio": c.ratio, "r_source": c.r_source, "p_total": c.p_total,
         "vclamp_typ": c.vclamp_typ, "vclamp_worst": c.vclamp_worst,
+        "power_verdict": c.power_verdict,
         "source_z": s.source_z, "sample_cyc": s.sample_cyc, "resolution": s.resolution,
     }
     for name, row in (("r1", c.r1_row), ("r2", c.r2_row), ("z", c.z_row), ("rs", c.rs_row),
@@ -517,3 +518,37 @@ def test_blank_rating_margin_shows_needs_input(w):
 def test_zzk_marked_reference_only(w):
     assert text(w.zener_panel.zzk_note) == "ZZK: reference only, not used in the calculation"
     assert "not used in the calculation" in w.zener_panel.zzk_tooltip.text
+
+
+# ── Follow-up 2: worst-case labels and the power verdict ──────────────────────
+
+def test_two_worst_case_voltages_labelled_apart(w):
+    """Component tab: nominal R1/R2 with the Zener at VZ max (3.43348 V).
+    MCU tab: V_mcuH, R1 min / R2 max / VZ max (3.43423 V)."""
+    load_reference(w)
+    labels = set(all_label_texts(w))
+    assert "Worst Zener (nominal R)" in labels and "Worst Case" not in labels
+    assert "Voltage at MCU Pin (nominal R1/R2)" in labels
+    assert "V_mcuH" in labels
+    r = w.app_state.result
+    assert text(w.components_tab.vclamp_worst) == f"{r.v_mcu_worst_zener:.3f}" == "3.433"
+    assert text(w.safety_tab.rec_row["value"]) == f"{r.v_mcu_worst:.3f} V" == "3.434 V"
+    legend = [t.get_text() for t in w.plot.ax.get_legend().get_texts()]
+    assert "V_mcuH (worst case)" in legend
+
+
+def test_power_verdict_shown(w):
+    load_reference(w)
+    assert text(w.components_tab.power_verdict) == "✓ PASS"
+    # typical margin is information only: no tick
+    assert text(w.components_tab.r1_row["margin"]) == "64%"
+    assert text(w.components_tab.r1_row["margin_worst"]) == "✓ 63%"
+    type_into(w, "r1.tol", "25")
+    type_into(w, "r2.tol", "25")
+    p_typ = w.app_state.result.p_r1_mw
+    type_into(w, "r1.rating", f"{1.3 * p_typ:.1f}")
+    assert text(w.components_tab.r1_row["margin"]) == "23%"
+    assert text(w.components_tab.r1_row["margin_worst"]).startswith("✗")
+    assert text(w.components_tab.power_verdict) == "✗ FAIL"
+    type_into(w, "r1.rating", "")
+    assert text(w.components_tab.power_verdict) == NEEDS_INPUT

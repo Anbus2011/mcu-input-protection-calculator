@@ -41,8 +41,8 @@ The Zener clamp is solved numerically due to its non-linear V-I curve.
 * **Edge Cases:** If IZ < 0.5 mA, clamping is considered ineffective. Cap the return voltage at VZ_nom or VZ_max (never above $V_{div}$). A solved voltage below $V_{Z\_knee}$ is raised to $V_{Z\_knee}$.
 * **Known limitation of the 0.5 mA rule (kept unchanged):** the curve follows the divider up to VZ, stays flat at VZ while IZ < 0.5 mA, then drops to the knee where IZ reaches 0.5 mA. Reference design (10k/18k, BZB984-C3V3): typical curve 3.300 V → 3.102 V (−198 mV) at 9.753 V in; worst-case curve (V_mcuH) 3.500 V → 3.395 V (−105 mV) at 10.115 V in. An input level right at that point can land on either side of the step.
 * **ZZK is reference only:** it is not used in the calculation (the panel says so). The V-I curve uses VZ, IZT, IZK and ZZT.
-* **Low-voltage Zener corner (worst-case power only):** VZ_min at IZT, knee 0.94 × VZ_min, ZZT typ, same three regions.
-* **Injection current estimate (used by the app; replaces the §4D formula below, which is left as it was):** injection starts at VDD + 0.3 V; R_s at its low tolerance, 0 when there is no R_s; 100 Ω stands for the internal ESD path:
+* **Low-voltage Zener corner (worst-case power only):** VZ_min at IZT, knee 0.94 × VZ_min, ZZT typ, same three regions. *Derived, not a datasheet value:* the datasheet gives only VZ_min at IZT; the 0.94 knee factor and ZZT typ are carried over from the typical curve (approved by DK, 2026-11-08).
+* **Injection current estimate (same formula as §4D):** injection starts at VDD + 0.3 V; R_s at its low tolerance, 0 when there is no R_s; 100 Ω stands for the internal ESD path:
   $$I_{inj} = \frac{\max(0,\ V_{mcuH} - (VDD + 0.3))}{R_{s,min} + 100}$$
   Label it an estimate. On STM32G4 FT/TT pins positive injection is not possible (DS12983 Rev 5, Table 15, note 3); pin-type limits come with the MCU part files.
 * **Power at max input, typical and worst case:**
@@ -76,8 +76,8 @@ The protection network forms an RC low-pass filter.
 
 ### D. STM32 Specific Constants
 * **Safe Max Limit:** VDDA + 0.3V (Threshold before internal ESD injection begins).
-* **Injection Current Estimate:** If V_mcu > VDD, calculate injection current in mA. The 100Ω represents internal ESD resistance:
-  $$I_{inj} = \frac{V_{mcu} - VDD}{R_{series} + 100}$$
+* **Injection Current Estimate:** Injection starts at VDD + 0.3 V; calculate the estimated injection current in mA from the worst-case pin voltage V_mcuH. R_s,min is R_s at its low tolerance (0 when there is no R_s); the 100Ω represents internal ESD resistance (see §4B):
+  $$I_{inj} = \frac{\max(0,\ V_{mcuH} - (VDD + 0.3))}{R_{s,min} + 100}$$
 * **ADC Source Impedance:** $$R_{source} = \frac{R1 \times R2}{R1 + R2} + R_{series}$$
 * **STM32G4 ADC Sampling Cycles:**
   * <= 1 kΩ -> 2.5 cycles
@@ -94,13 +94,13 @@ After ANY code change, run the test suite before committing:
 python -m pytest tests/ -v
 ```
 
-All 394 tests must pass. The suite covers:
+All 401 tests must pass. The suite covers:
 * **Circuit model** (`test_circuit_model.py`, 35 tests): Zener 3-region V-I model, ADC sample lookup, full divider calculation, Kirchhoff's current law balance, power sums, tolerance worst-case ratios, operating points, results.div cross-check, edge cases
 * **Bandwidth model** (`test_bandwidth_model.py`, 17 tests): RC time constant, -3dB bandwidth, rise time, threshold timing formulas, all 4 frequency limits, counter overflow signed/unsigned, edge cases
 * **File I/O** (`test_file_io.py`, 8 tests): Save/load round-trip, JSON format version, backwards compatibility with shipped results.div, minimal file loading, dirty tracking
-* **Model fixes** (`test_fixes_model.py`, 46 tests): reference case, one solver for results/operating points/plot (V_input max 5 V repro), bisection (R1 = R2 = 100 Ω converges, root within 1 µV, "did not settle" warning when bracketing fails, 0.5 mA cap step kept), no results from missing inputs, no dataclass defaults, ZZK reference only, zero ratings, ADC bits (VREF / 2^N), VIL/VIH factors, V_high, "never reaches VIH" with no fallback, injection estimate (VDD + 0.3 V, R_s min; reference 0 mA), worst-case power ≥ typical and hand-checked corners (R1, R_s), blank rating = "needs input"
+* **Model fixes** (`test_fixes_model.py`, 51 tests): reference case, one solver for results/operating points/plot (V_input max 5 V repro), bisection (R1 = R2 = 100 Ω converges, root within 1 µV, "did not settle" warning when bracketing fails, 0.5 mA cap step kept), no results from missing inputs, no dataclass defaults, ZZK reference only, zero ratings, ADC bits (VREF / 2^N), VIL/VIH factors, V_high, "never reaches VIH" with no fallback, injection estimate (VDD + 0.3 V, R_s min; reference 0 mA), worst-case power ≥ typical and hand-checked corners (R1, R_s), blank rating = "needs input", power verdict from the worst-case margins (typical pass + worst fail = FAIL)
 * **AppState** (`test_fixes_app_state.py`, 108 tests): bandwidth derivation (τ resistance, VIL/VIH, V_high), bandwidth starting values / save / load / fill, every field marks unsaved, blank design, "needs input" (VZ min only for worst-case power, R_s rating/tolerance when R_s > 0, blank rating), range checks, R_s rules and R_s min in the injection estimate, unreadable text blocks Save, atomic save, file validation (null, missing, malformed, Ω/kΩ/MΩ), change tracking after a failed load, preset "modified" / Custom + preset_base
-* **UI** (`test_ui.py`, 180 tests; needs a desktop session): drives the real, withdrawn window through its widgets: change tracking on every input (typing, paste, cut, delete, notes, checkbox, comboboxes), blank / 0 / unreadable on every numeric field, New Design clearing everything, both save-failure messages, preset shown as modified, results.div giving bandwidth outputs, plot clearing, failed loads, injection row labelled as an estimate (reference 0.00 mA), typical / worst-case power and the R_s row, blank rating = "needs input", ZZK marked reference only, solver warning
+* **UI** (`test_ui.py`, 182 tests; needs a desktop session): drives the real, withdrawn window through its widgets: change tracking on every input (typing, paste, cut, delete, notes, checkbox, comboboxes), blank / 0 / unreadable on every numeric field, New Design clearing everything, both save-failure messages, preset shown as modified, results.div giving bandwidth outputs, plot clearing, failed loads, injection row labelled as an estimate (reference 0.00 mA), typical / worst-case power and the R_s row, blank rating = "needs input", ZZK marked reference only, solver warning, the two worst-case voltages labelled apart, power verdict
 
 If a test fails after your change, fix the issue before committing. Do not skip or delete tests.
 

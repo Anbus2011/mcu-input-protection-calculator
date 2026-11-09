@@ -384,7 +384,7 @@ class TestWorstCasePower:
         assert r.v_mcu_worst is not None and r.i_injection_ma is not None
         for key, miss in r.missing.items():
             if "zener.vz_min" in miss:
-                assert "worst" in key or key == "power_worst", key
+                assert "worst" in key or key in ("power_worst", "power_verdict"), key
 
     def test_no_series_resistor_has_no_rs_power(self):
         r = calculate_all(*reference())
@@ -409,3 +409,48 @@ class TestBlankRatingMargin:
         assert r.p_r1_mw is not None
         src = inspect.getsource(circuit_model)
         assert "* 1.5" not in src
+
+
+# ── Follow-up 2: the worst-case margin is the power verdict ──────────────────
+
+class TestPowerVerdict:
+    def test_reference_case_passes(self):
+        r = calculate_all(*reference())
+        assert r.power_verdict == ("✓ PASS", circuit_model.PASS)
+        for part in ("r1", "r2", "z"):
+            assert getattr(r, f"{part}_margin_worst_status")[1] == circuit_model.PASS
+            # typical margin is information only
+            assert getattr(r, f"{part}_margin_status")[1] == circuit_model.INFO
+
+    def test_typical_passes_worst_fails_gives_fail(self):
+        """R1/R2 at 25 %: R1 rating 1.3 x typical power gives a typical margin
+        of 23 % (PASS by the > 20 % threshold) but the worst-case power is
+        above the rating."""
+        p_typ = calculate_all(*reference(r1_tol_pct=25, r2_tol_pct=25)).p_r1_mw
+        r = calculate_all(*reference(r1_tol_pct=25, r2_tol_pct=25,
+                                     r1_rating_mw=1.3 * p_typ))
+        assert r.r1_margin_pct > 20                      # typical would pass
+        assert circuit_model._margin_status(r.r1_margin_pct)[1] == circuit_model.PASS
+        assert r.r1_margin_worst_pct <= 0
+        assert r.r1_margin_worst_status[1] == circuit_model.FAIL
+        assert r.power_verdict == ("✗ FAIL", circuit_model.FAIL)
+
+    def test_tight_worst_margin_gives_tight(self):
+        p = calculate_all(*reference()).p_z_worst_mw
+        r = calculate_all(*reference(ptot_mw=p / 0.9))   # 10 % worst-case margin
+        assert r.power_verdict == ("⚠ TIGHT", circuit_model.WARN)
+
+    def test_blank_rating_blocks_verdict(self):
+        r = calculate_all(*reference(r2_rating_mw=None))
+        assert r.power_verdict is None
+        assert "resistors.r2_rating_mw" in r.missing["power_verdict"]
+
+    def test_series_resistor_counts_in_verdict(self):
+        base = dict(r1_ohms=1000, rs_ohms=1000, rs_tol_pct=5,
+                    r1_rating_mw=2000, ptot_mw=5000)
+        p_rs = calculate_all(*reference(**base, rs_rating_mw=1000)).p_rs_worst_mw
+        assert calculate_all(*reference(**base, rs_rating_mw=1000)).power_verdict[1] \
+            == circuit_model.PASS
+        r = calculate_all(*reference(**base, rs_rating_mw=p_rs * 0.9))
+        assert r.rs_margin_worst_status[1] == circuit_model.FAIL
+        assert r.power_verdict[1] == circuit_model.FAIL

@@ -182,23 +182,24 @@ Free-form text area for annotations. Saved with the `.div` file.
 
 - **Divider Network** - input impedance, divider ratio, ADC source impedance (R1∥R2 + R_s), total typical power dissipation (R1 + R2 + Zener)
 - **Component Power** - for R1, R2, the Zener and R_s at max input: typical current, typical power, worst-case power, rating, and margin % against both the typical and the worst-case power
-- **Voltage at MCU Pin** - typical and worst-case V_mcu at maximum input voltage
+- **Power verdict (worst case)** - PASS / TIGHT / FAIL from the worst-case margins of all parts (FAIL if any part fails, TIGHT if any is tight)
+- **Voltage at MCU Pin (nominal R1/R2)** - "Typical Zener" (VZ nom) and "Worst Zener (nominal R)" (VZ max) at maximum input voltage, with R1 and R2 at their nominal values. This is not the full worst case: that is V_mcuH (R1 min, R2 max, VZ max) on the MCU Input tab, which is why the reference design shows 3.433 V here and 3.434 V there.
 
 Typical power uses nominal resistors and the typical Zener (VZ nom). Worst-case power is the highest value over these corners, taken separately for each part:
 
 - R1 at min or max tolerance x R2 at min or max tolerance x the Zener at **VZ min** (low-voltage corner: knee 0.94 x VZ min, ZZT typ) or **VZ max** (high-voltage corner: knee 0.97 x VZ max, ZZT max) - eight corners - plus the typical point;
 - R_s: the estimated injection current at the worst-case pin voltage (V_mcuH), with R_s anywhere in its tolerance band (the maximum of I^2 x R_s is at an end of the band, or at 100 Ω if that lies inside it).
 
-A blank rating shows **needs input** in both margin cells.
+A blank rating shows **needs input** in both margin cells. The worst-case margin is the verdict for every part; the typical margin is shown for information only (grey, no tick or cross).
 
-Margin indicators:
+Margin indicators (worst-case margin column and the power verdict):
 - **Green** (> 20% margin) - safe
 - **Orange** (0-20% margin) - tight
 - **Red** (negative margin) - exceeds rating
 
 #### Tab 2: MCU Input
 
-- **Voltage Limits** - V_mcu vs Safe Max and Absolute Max with margin in mV and pass/fail status
+- **Voltage Limits** - V_mcuH (R1 min, R2 max, Zener at VZ max) vs Safe Max and Absolute Max with margin in mV and pass/fail status
 - **Injection Current (estimate)** - I_inj = max(0, V_mcuH - (VDD + 0.3 V)) / (R_s min + 100 Ω), where R_s min is R_s at its low tolerance (0 when there is no R_s) and 100 Ω stands for the internal ESD path. It is a rough model: on STM32G4 FT/TT pins positive injection is not possible at all (DS12983 Rev 5, Table 15, note 3). The reference design gives 0 mA.
 - **ADC Performance** - source impedance, recommended minimum sample cycles (STM32G4), and resolution in mV/LSB (VREF / 2^N referred to the divider input)
 
@@ -259,7 +260,7 @@ The **effective limit** is the minimum of all four, with the bottleneck identifi
 The bottom of the right panel shows **V_mcu vs V_input**:
 
 - **Cyan line** - typical V_mcu (nominal components, typical Zener)
-- **Orange line** - worst-case V_mcu (tolerance-shifted resistors, worst Zener)
+- **Orange line** - V_mcuH, the worst case (R1 min, R2 max, Zener at VZ max)
 - **Green dashed** - VDD threshold
 - **Gold dashed** - Safe Max threshold
 - **Red dashed** - Absolute Max threshold
@@ -484,7 +485,7 @@ BANDWIDTH_STARTING_VALUES = {
 python -m pytest tests/ -v
 ```
 
-All 394 tests must pass. `tests/test_ui.py` drives the real window (withdrawn), so it needs a desktop session.
+All 401 tests must pass. `tests/test_ui.py` drives the real window (withdrawn), so it needs a desktop session.
 
 ---
 

@@ -112,24 +112,37 @@ class ComponentsTab:
             "(high-voltage corner), and the typical point.\n"
             "R_s: worst-case node voltage (V_mcuH), R_s over its tolerance.",
             None,
-            "Rating margin against the typical power.",
-            "Rating margin against the worst-case power.",
+            "Rating margin against the typical power.\nFor information only; "
+            "the verdict uses the worst-case margin.",
+            "Rating margin against the worst-case power. This is the verdict:\n"
+            "PASS > 20 %, TIGHT 0-20 %, FAIL ≤ 0 %.",
         ]
         _table_header(ct, ["Part", "Current", "Power typ", "Power worst", "Rating",
                            "Margin typ", "Margin worst"], ccw, tips)
         keys = ["current", "power", "power_worst", "rating", "margin", "margin_worst"]
-        bold = {"margin", "margin_worst"}
+        bold = {"margin_worst"}     # the verdict column
         self.r1_row = _cells_row(ct, "R1", 1, ccw, keys, bold)
         self.r2_row = _cells_row(ct, "R2", 2, ccw, keys, bold)
         self.z_row = _cells_row(ct, "Zener", 3, ccw, keys, bold)
         self.rs_row = _cells_row(ct, "R_s", 4, ccw, keys, bold)
 
-        ctk.CTkLabel(parent, text="Voltage at MCU Pin", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
+        vf = ctk.CTkFrame(parent, fg_color="transparent"); vf.pack(anchor="w", padx=10, pady=(4, 0))
+        ctk.CTkLabel(vf, text="Power verdict (worst case):", font=("", 13)).pack(side="left")
+        self.power_verdict = ctk.CTkLabel(vf, text=NEEDS_INPUT, font=("", 13, "bold"),
+                                          text_color=MUTED)
+        self.power_verdict.pack(side="left", padx=(6, 0))
+
+        ctk.CTkLabel(parent, text="Voltage at MCU Pin (nominal R1/R2)", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
         vt = ctk.CTkFrame(parent, fg_color="transparent"); vt.pack(fill="x", padx=10)
-        vcw = [150, 100, 60]
-        _table_header(vt, ["Condition", "V_mcu", "Unit"], vcw)
-        self.vclamp_typ = _table_row(vt, "Typical", "V", 1, vcw)
-        self.vclamp_worst = _table_row(vt, "Worst Case", "V", 2, vcw)
+        vcw = [200, 100, 60]
+        _table_header(vt, ["Condition", "V_mcu", "Unit"], vcw, [
+            None,
+            "Nominal R1 and R2 (no tolerance).\nTypical: Zener at VZ nom.\n"
+            "Worst Zener: Zener at VZ max.\nThe full worst case (R1 min, R2 max, "
+            "VZ max) is V_mcuH on the MCU Input tab.",
+            None])
+        self.vclamp_typ = _table_row(vt, "Typical Zener", "V", 1, vcw)
+        self.vclamp_worst = _table_row(vt, "Worst Zener (nominal R)", "V", 2, vcw)
 
     def refresh(self, r: CalculationResult):
         _show(self.r_total, None if r.r_total_ohms is None else r.r_total_ohms / 1000)
@@ -153,6 +166,7 @@ class ComponentsTab:
             _show_status(row["margin"], getattr(r, f"{name}_margin_status"))
             _show_status(row["margin_worst"], getattr(r, f"{name}_margin_worst_status"))
 
+        _show_status(self.power_verdict, r.power_verdict)
         _show(self.vclamp_typ, r.v_mcu_typ, "{:.3f}")
         _show(self.vclamp_worst, r.v_mcu_worst_zener, "{:.3f}")
 
@@ -169,12 +183,12 @@ class SafetyTab:
         vw = [150, 90, 90, 90, 90]
         vt_tips = [
             None,
-            "Worst-case voltage at the MCU pin.\nCalculated with tolerance-shifted resistors\nand worst-case Zener at maximum input voltage.",
+            "V_mcuH: worst-case voltage at the MCU pin.\nR1 min, R2 max (tolerance) and Zener at VZ max,\nat maximum input voltage.\nNot the same as 'Worst Zener (nominal R)'\non the Component Analysis tab.",
             "The MCU voltage threshold being compared against.\nSafe Max = recommended operating limit.\nAbs Max = damage threshold from datasheet.",
             "How much headroom remains: Limit minus V_mcu.\nPositive = safe, negative = exceeded.",
             "PASS = safe margin.\nTIGHT = within spec but close.\nFAIL = limit exceeded.",
         ]
-        _table_header(vt, ["Parameter", "V_mcu", "Limit", "Margin", "Status"], vw, vt_tips)
+        _table_header(vt, ["Parameter", "V_mcuH", "Limit", "Margin", "Status"], vw, vt_tips)
         keys = ["value", "limit", "margin", "status"]
         self.rec_row = _cells_row(vt, "vs Safe Max", 1, vw, keys, {"status"})
         self.abs_row = _cells_row(vt, "vs Absolute Max", 2, vw, keys, {"status"})

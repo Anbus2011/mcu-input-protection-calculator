@@ -153,6 +153,8 @@ class CalculationResult:
     r2_margin_worst_status: Optional[tuple] = None
     z_margin_worst_status: Optional[tuple] = None
     rs_margin_worst_status: Optional[tuple] = None
+    # Overall power verdict from the worst-case margins (text, level)
+    power_verdict: Optional[tuple] = None
     r1_rating_mw: Optional[float] = None
     r2_rating_mw: Optional[float] = None
     z_ptot_mw: Optional[float] = None
@@ -593,6 +595,7 @@ def calculate_all(resistors: ResistorParams, zener: ZenerParams,
              ("z", "zener.ptot_mw", "typ_at_max", "p_z_worst")]
     if res.has_rs:
         parts.append(("rs", RS_RATING, "p_rs", "p_rs_worst"))
+    # The worst-case margin is the verdict; the typical margin is information.
     for name, rating, typ_dep, worst_dep in parts:
         for suffix, power, dep in (("", f"p_{name}_mw", typ_dep),
                                    ("_worst", f"p_{name}_worst_mw", worst_dep)):
@@ -600,7 +603,20 @@ def calculate_all(resistors: ResistorParams, zener: ZenerParams,
                 p = getattr(res, power)
                 pct = (inp[rating] - p) / inp[rating] * 100
                 setattr(res, f"{name}_margin{suffix}_pct", pct)
-                setattr(res, f"{name}_margin{suffix}_status", _margin_status(pct))
+                status = _margin_status(pct) if suffix else (f"{pct:.0f}%", INFO)
+                setattr(res, f"{name}_margin{suffix}_status", status)
+
+    # Overall power verdict: the worst of the worst-case margin verdicts
+    worst_keys = tuple(f"{name}_margin_worst" for name, _, _, _ in parts)
+    if need("power_verdict", deps=worst_keys):
+        levels = [getattr(res, f"{name}_margin_worst_status")[1]
+                  for name, _, _, _ in parts]
+        if FAIL in levels:
+            res.power_verdict = ("✗ FAIL", FAIL)
+        elif WARN in levels:
+            res.power_verdict = ("⚠ TIGHT", WARN)
+        else:
+            res.power_verdict = ("✓ PASS", PASS)
 
     if need("margin_rec", "mcu.v_recommended_max", deps=("v_mcu_worst",)):
         res.margin_rec_v = v_rec_max - res.v_mcu_worst

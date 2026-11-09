@@ -86,7 +86,7 @@ class PlotCanvas(ctk.CTkFrame):
             self.ax.plot(v_in, pd["v_mcu_typ"], "c-", linewidth=2, label="V_mcu (typical)")
         if "v_mcu_worst" in pd:
             self.ax.plot(v_in, pd["v_mcu_worst"], color="orange", linewidth=2,
-                         linestyle="-", label="V_mcu (worst)")
+                         linestyle="-", label="V_mcuH (worst case)")
 
         # Threshold lines (only those whose inputs are present)
         dash_seq = (5, 3)
