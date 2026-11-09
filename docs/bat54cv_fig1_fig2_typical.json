@@ -1,0 +1,57 @@
+{
+ "_about": "Nexperia BAT54CV data sheet, 27 December 2022, Fig. 1 (forward current against forward voltage) and Fig. 2 (reverse current against reverse voltage), curve (3): typical values at Tamb = 25 C. Read from the graphs' vector paths in the PDF; treat as accurate to about +/-0.01 V (forward) and +/-5 % (reverse). Typical only: Table 7 gives maximum VF at 0.1, 1, 10, 30 and 100 mA (240, 320, 400, 500, 800 mV), maximum IR 2 uA at VR = 25 V and maximum Cd 10 pF at VR = 1 V.",
+ "forward": {
+  "current_a": [
+   0.00011,
+   0.0002,
+   0.0005,
+   0.001,
+   0.002,
+   0.005,
+   0.01,
+   0.02,
+   0.03,
+   0.05,
+   0.1,
+   0.2
+  ],
+  "typical_v": [
+   0.152,
+   0.165,
+   0.191,
+   0.213,
+   0.236,
+   0.271,
+   0.3,
+   0.335,
+   0.361,
+   0.413,
+   0.55,
+   0.722
+  ]
+ },
+ "reverse": {
+  "voltage_v": [
+   1,
+   2,
+   3,
+   5,
+   10,
+   15,
+   20,
+   25,
+   29.9
+  ],
+  "typical_current_a": [
+   4e-07,
+   4.53e-07,
+   4.95e-07,
+   5.7e-07,
+   7.41e-07,
+   9.12e-07,
+   1.09e-06,
+   1.27e-06,
+   1.42e-06
+  ]
+ }
+}
