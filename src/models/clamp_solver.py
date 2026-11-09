@@ -39,8 +39,8 @@ TABLES = ("forward", "reverse")
 COLUMNS = ("min", "typ", "max")
 ROW_KEYS = ("i_ma", "v_min", "v_typ", "v_max")
 
-SOLVER_TOLERANCE_V = 1e-6     # bisection stops when the bracket is 1 µV wide
-SOLVER_MAX_ITERATIONS = 200   # a guard only: 1 kV / 2^200 is far below 1 µV
+SOLVER_TOLERANCE_V = 1e-9     # bisection stops when the bracket is 1 nV wide
+SOLVER_MAX_ITERATIONS = 200   # a guard only: 1 kV / 2^200 is far below 1 nV
 _LN_CURRENT_MAX = 690.0       # exp() guard for a steep segment extended far
 
 # Injection starts at VDD + 0.3 V; 100 ohm stands for the internal ESD path.
@@ -312,8 +312,8 @@ def _solve_node(vin: float, r1: float, r2: float, sign: float, v_ref: float,
     f(V) = (vin - V)/R1 - V/R2 - I_diode_out(V) falls strictly as V rises, is
     not negative at the lowest of vin, 0 and v_ref and not positive at the
     highest, so bisection on that bracket finds the single root. It stops when
-    the bracket is 1 µV wide. ``settled`` is False when the bracket has no
-    sign change or does not narrow to 1 µV; the returned voltage (the plain
+    the bracket is 1 nV wide. ``settled`` is False when the bracket has no
+    sign change or does not narrow to 1 nV; the returned voltage (the plain
     divider voltage) is then not reliable.
     """
     forward, reverse = curves["forward"], curves["reverse"]

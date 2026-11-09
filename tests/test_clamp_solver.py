@@ -60,6 +60,9 @@ class TestReferenceNumbers:
         (results_design(30), 3.106, 2.906, 3.307),
     ])
     def test_table(self, design, typ, low, high):
+        """The table of docs/session2_prompt.md, within 0.01 V. It was worked
+        out with typical -/+ 0.2 V in every row; the 5 mA row is now Table 8
+        (3.10 / 3.50 V), which moves the two 30 V rows by 5 to 10 mV."""
         row = solve(design)["voltages"]["levels"]["max_input"]
         assert row["typ"] == pytest.approx(typ, abs=0.01)
         assert row["low"] == pytest.approx(low, abs=0.01)
@@ -71,8 +74,18 @@ class TestReferenceNumbers:
                (zener_reference(), results_design(3.0), results_design(4.1),
                 results_design(30))]
         assert [(f"{r['typ']:.3f}", f"{r['low']:.3f}", f"{r['high']:.3f}") for r in got] == [
-            ("3.020", "2.820", "3.219"), ("1.928", "1.789", "2.054"),
-            ("2.156", "1.990", "2.318"), ("3.106", "2.906", "3.307")]
+            ("3.020", "2.825", "3.224"), ("1.928", "1.789", "2.054"),
+            ("2.156", "1.990", "2.318"), ("3.106", "2.916", "3.316")]
+
+    def test_only_the_5_ma_row_moved_the_table(self):
+        """With typical -/+ 0.2 V in every row the solver gives the table of
+        docs/session2_prompt.md to the millivolt."""
+        rows = [dict(r, v_min=round(r["v_typ"] - 0.2, 3), v_max=round(r["v_typ"] + 0.2, 3))
+                for r in zener_reference()["clamp_diode"]["reverse"]]
+        got = [solve(change(d, clamp_diode__reverse=rows))["voltages"]["levels"]["max_input"]
+               for d in (zener_reference(), results_design(30))]
+        assert [(f"{r['typ']:.3f}", f"{r['low']:.3f}", f"{r['high']:.3f}") for r in got] == [
+            ("3.020", "2.820", "3.219"), ("3.106", "2.906", "3.307")]
 
     def test_first_row_by_hand(self):
         """At 3.02 V the diode current is (30 - 3.02)/10k - 3.02/18k = 2.53 mA,
@@ -121,8 +134,13 @@ class TestReferenceNumbers:
         rows = zener_reference()["clamp_diode"]["reverse"]
         assert [r["v_typ"] for r in rows] == C3V3_TYPICAL_V
         for r in rows:
-            assert r["v_min"] == pytest.approx(r["v_typ"] - 0.2)
-            assert r["v_max"] == pytest.approx(r["v_typ"] + 0.2)
+            if r["i_ma"] == 5:      # Table 8: VZ 3.1 to 3.5 V at IZ = 5 mA
+                assert (r["v_min"], r["v_typ"], r["v_max"]) == (3.10, 3.28, 3.50)
+            else:
+                assert r["v_min"] == pytest.approx(r["v_typ"] - 0.2)
+                assert r["v_max"] == pytest.approx(r["v_typ"] + 0.2)
+        note = zener_reference()["clamp_diode"]["note"]
+        assert "5 mA row" in note and "Table 8" in note and "Every other row" in note
 
 
 class TestSchottkyToRail:
@@ -355,8 +373,8 @@ class TestDiodeTable:
 class TestBisection:
     @pytest.mark.parametrize("name", list(WIRINGS))
     @pytest.mark.parametrize("vin", [-5.0, 0.5, 3.0, 30.0])
-    def test_root_within_one_microvolt(self, name, vin):
-        """The residual of the node equation changes sign within 1 µV of the
+    def test_root_within_one_nanovolt(self, name, vin):
+        """The residual of the node equation changes sign within 1 nV of the
         returned voltage."""
         c = prepare(WIRINGS[name]())
         curves = c.v[clamp_solver.CURVE["typ"]]
@@ -368,7 +386,8 @@ class TestBisection:
             i = clamp_solver._curve_current(curves["forward"], vd) if vd > 0 else \
                 -clamp_solver._curve_current(curves["reverse"], -vd) if vd < 0 else 0.0
             return (vin - x) / 10000 - x / 18000 - c.sign * i
-        assert residual(v - 1e-6) > 0 > residual(v + 1e-6)
+        assert clamp_solver.SOLVER_TOLERANCE_V == 1e-9
+        assert residual(v - 1e-9) > 0 > residual(v + 1e-9)
 
     def test_low_value_divider_converges(self):
         r = solve(zener_reference(resistors__r1__value=100, resistors__r1__unit=OHM,
@@ -744,7 +763,7 @@ class TestPower:
         reverse = zener_reference()["clamp_diode"]["reverse"]
         assert v == pytest.approx(table_voltage(reverse, "v_min", amps), abs=2e-6)
         assert d["p_r1_worst_mw"] == pytest.approx((30 - v) ** 2 / 9.9)
-        assert d["p_r1_worst_mw"] == pytest.approx(74.58, abs=0.01)
+        assert d["p_r1_worst_mw"] == pytest.approx(74.55, abs=0.01)
         assert d["worst_power_corner"]["r1"] == "R1 min, R2 min, diode min"
 
     def test_series_resistor_power(self):

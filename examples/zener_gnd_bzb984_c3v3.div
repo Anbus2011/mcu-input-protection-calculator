@@ -11,7 +11,7 @@
     "part": "BZB984-C3V3",
     "source": "Nexperia BZB984 series Rev 3: Fig. 7, Tables 5, 7 and 8",
     "checked": false,
-    "note": "reverse: v_typ is Fig. 7 (typical working voltage against current, Tj = 25 C), read from the graph to about +/-0.02 V. v_min = v_typ - 0.2 V and v_max = v_typ + 0.2 V: Table 8 gives VZ 3.1 to 3.5 V at 5 mA only, and the same +/-0.2 V is used at every current. 25 C only, no temperature spread. Table 8 IR max (5 uA at VR = 1 V) is leakier than v_min here (about 1.5 uA at 1 V) and is not folded in. forward: empty, not modelled (Table 7 gives one point, VF max 0.9 V at 10 mA). capacitance: Cd max at VR = 0 V, 1 MHz (Table 8). ptot: one diode loaded, Tamb <= 25 C (Table 5).",
+    "note": "reverse: v_typ is Fig. 7 (typical working voltage against current, Tj = 25 C), read from the graph to about +/-0.02 V. 5 mA row: v_min 3.10 V and v_max 3.50 V are Table 8 (VZ at IZ = 5 mA), so that row is v_typ - 0.18 V and v_typ + 0.22 V. Every other row: v_min = v_typ - 0.20 V and v_max = v_typ + 0.20 V, half the width of the Table 8 band; the data sheet gives no limits away from 5 mA. 25 C only, no temperature spread. Table 8 IR max (5 uA at VR = 1 V) is leakier than v_min here (about 1.5 uA at 1 V) and is not folded in. forward: empty, not modelled (Table 7 gives one point, VF max 0.9 V at 10 mA). capacitance: Cd max at VR = 0 V, 1 MHz (Table 8). ptot: one diode loaded, Tamb <= 25 C (Table 5).",
     "type": "zener",
     "anode": "gnd",
     "cathode": "node",
@@ -30,7 +30,7 @@
       {"i_ma": 0.5, "v_min": 2.27, "v_typ": 2.47, "v_max": 2.67},
       {"i_ma": 1, "v_min": 2.49, "v_typ": 2.69, "v_max": 2.89},
       {"i_ma": 2, "v_min": 2.73, "v_typ": 2.93, "v_max": 3.13},
-      {"i_ma": 5, "v_min": 3.08, "v_typ": 3.28, "v_max": 3.48},
+      {"i_ma": 5, "v_min": 3.1, "v_typ": 3.28, "v_max": 3.5},
       {"i_ma": 10, "v_min": 3.35, "v_typ": 3.55, "v_max": 3.75}
     ]
   },
@@ -66,14 +66,14 @@
     "solver_version": "2.0.0",
     "verdict": "FAIL",
     "checks": [
-      {"id": "pin_max_safe", "status": "PASS", "value": 3.219492, "limit": 3.6, "unit": "V"},
-      {"id": "pin_max_abs", "status": "PASS", "value": 3.219492, "limit": 4.0, "unit": "V"},
+      {"id": "pin_max_safe", "status": "PASS", "value": 3.224481, "limit": 3.6, "unit": "V"},
+      {"id": "pin_max_abs", "status": "PASS", "value": 3.224481, "limit": 4.0, "unit": "V"},
       {"id": "injection", "status": "PASS", "value": 0.0, "limit": 1.0, "unit": "mA"},
       {"id": "logic_high", "status": "FAIL", "value": 1.816732, "limit": 2.31, "unit": "V"},
-      {"id": "logic_low", "status": "PASS", "value": 0.6473546, "limit": 0.99, "unit": "V"},
-      {"id": "power_r1", "status": "PASS", "value": 74.57675, "limit": 200, "unit": "mW"},
-      {"id": "power_r2", "status": "PASS", "value": 0.581466, "limit": 100, "unit": "mW"},
-      {"id": "power_diode", "status": "PASS", "value": 8.138914, "limit": 265, "unit": "mW"},
+      {"id": "logic_low", "status": "PASS", "value": 0.6473544, "limit": 0.99, "unit": "V"},
+      {"id": "power_r1", "status": "PASS", "value": 74.5467, "limit": 200, "unit": "mW"},
+      {"id": "power_r2", "status": "PASS", "value": 0.5832589, "limit": 100, "unit": "mW"},
+      {"id": "power_diode", "status": "PASS", "value": 8.149017, "limit": 265, "unit": "mW"},
       {"id": "analog_range", "status": "PASS", "value": 2.336395, "limit": 3.3, "unit": "V"},
       {"id": "analog_error", "status": null, "value": -38.78108, "limit": null, "unit": "%"}
     ],
@@ -86,10 +86,10 @@
       "vih": 2.31,
       "levels": {
         "zero": {"v_in": 0.0, "typ": 0.0, "low": 0.0, "high": 0.0},
-        "logic_low": {"v_in": 1.0, "typ": 0.6425776, "low": 0.6372952, "high": 0.6473546},
-        "logic_high": {"v_in": 3.8, "typ": 1.962661, "low": 1.816732, "high": 2.098173},
+        "logic_low": {"v_in": 1.0, "typ": 0.6425773, "low": 0.6372951, "high": 0.6473544},
+        "logic_high": {"v_in": 3.8, "typ": 1.96266, "low": 1.816732, "high": 2.098173},
         "analog_fullscale": {"v_in": 5.1, "typ": 2.171218, "low": 2.002503, "high": 2.336395},
-        "max_input": {"v_in": 30, "typ": 3.019829, "low": 2.820215, "high": 3.219492}
+        "max_input": {"v_in": 30, "typ": 3.019829, "low": 2.825246, "high": 3.224481}
       }
     },
     "needs_input": [],

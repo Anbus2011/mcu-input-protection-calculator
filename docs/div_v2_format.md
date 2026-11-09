@@ -131,7 +131,34 @@ Written only by the solver (`divcheck.py` or the app's Save). Numbers are rounde
 
 `typ` is nominal resistors with the typical column. `low` and `high` are the lowest and highest of the eight corners R1 min/max × R2 min/max × diode column min/max.
 
-A check `status` is `"PASS"`, `"TIGHT"`, `"FAIL"`, `"needs input"`, or `null` for a check that is information only.
+### Statuses
+
+| `status` | Meaning |
+|---|---|
+| `"PASS"` | Inside the limit, with the margin the check asks for. |
+| `"TIGHT"` | Not a failure, but not comfortable. Either inside the limit with less than the required margin, or past `limit` and still inside a second, outer limit. Which one depends on the check: see the table. |
+| `"FAIL"` | Past the limit (the outer one, where there are two). |
+| `"needs input"` | An input the check uses is blank or unusable; `needs_input` names it. |
+| `null` | The check is information only (`analog_error` without an allowed error). |
+
+`limit` in a check is always the first limit named below. For `analog_range` and `frequency`, a `value` past `limit` is therefore TIGHT, not FAIL, until it passes the outer limit.
+
+| Check `id` | PASS | TIGHT | FAIL |
+|---|---|---|---|
+| `pin_max_safe` | at least 50 mV below `limit` | less than 50 mV below `limit`, down to exactly at it | above `limit` |
+| `pin_max_abs` | at least 100 mV below `limit` | less than 100 mV below `limit`, down to exactly at it | above `limit` |
+| `injection` | up to half of `limit` | above half, up to `limit` | above `limit` |
+| `power_r1`, `power_r2`, `power_diode`, `power_rs` | below 80 % of `limit` (margin above 20 %) | from 80 % of `limit` to just below it | at or above `limit` |
+| `analog_range` | up to `limit` (VDD) | above VDD, up to Safe Max | above Safe Max |
+| `frequency` | up to `limit` ("reliable up to") | above it, up to "may work up to" | above "may work up to", or the pin never reads high or low |
+| `pin_min` | at or above `limit` | never | below `limit` |
+| `logic_high` | above `limit` (VIH) | never | at or below `limit` |
+| `logic_low` | below `limit` (VIL) | never | at or above `limit` |
+| `analog_error` | size of the error up to `limit` | never | above `limit` |
+
+Example: in `examples/schottky_rail_bat54cv.div`, `analog_range` is TIGHT with `value` 3.301258 V against `limit` 3.3 V. At the 5.1 V full-scale input the divider alone, with R1 at −1 % and R2 at +1 %, gives 5.1 × 18.18 / 28.08 = 3.3019 V. That is above VDD, so the ADC reaches full scale just before the input does; it is far below Safe Max (3.6 V), so the pin is not at risk.
+
+### The checks
 
 | Check `id` | `value` | `limit` | Present |
 |---|---|---|---|
@@ -150,6 +177,61 @@ A check `status` is `"PASS"`, `"TIGHT"`, `"FAIL"`, `"needs input"`, or `null` fo
 Information `id`s: `f_may_work` and `f_reliable` (Hz, always), `rail_current` (mA into VDD at the maximum input, diode connected to `vdd`), `touch_pin_high`, `touch_diode_current`, `touch_r1_power` (touch voltage given).
 
 Level ids: `min_input`, `zero`, `logic_low`, `logic_high`, `analog_fullscale`, `max_input`, `touch`. Optional levels appear only when their input is given.
+
+## How four of the results are calculated
+
+Every pin voltage comes from one node solve: the current through R1 equals the current through R2 plus the diode current, found by bisection to 1 nV. "Lowest" and "highest" always mean the lowest and highest of the eight corners (R1 min/max × R2 min/max × diode column `v_min`/`v_max`). The solver does not choose a corner in advance; the table at the end of this section shows which corner it turned out to be in the two examples.
+
+Resistor limits: R min = R × (1 − tolerance), R max = R × (1 + tolerance). With no series resistor, R_s min = R_s max = 0.
+
+### `injection` (mA)
+
+    I_inj = max(0, V_high − (VDD + 0.3 V)) / (R_s min + 100 Ω)
+
+- V_high: the highest pin voltage at `v_input_max` (the `value` of `pin_max_safe`).
+- R_s min: the series resistor at its low tolerance, which gives the most current.
+- 0.3 V: injection is taken to start at VDD + 0.3 V.
+- 100 Ω: stands for the pin's internal protection path. It is an assumption carried over from the first version of the app, not a data-sheet value.
+
+This is an estimate. It does not model the MCU's protection diodes.
+
+### `analog_error` (%)
+
+At `v_analog_fullscale`, with R1 and R2 at their nominal values:
+
+    V_ideal = v_analog_fullscale × R2 / (R1 + R2)        (pin voltage without the diode)
+    error   = V_pin − V_ideal                            (V_pin: solved with the diode)
+    value   = error / V_ideal × 100
+
+The error is worked out twice, with the `v_min` column and with the `v_max` column, and the one of larger size is kept, with its sign. Negative means the diode pulls the reading down. No resistor tolerance is included: this check isolates what the diode does to the reading. The app also shows the same error in mV and in LSB (error ÷ (VDD / 2^`adc_bits`)).
+
+### `f_may_work` and `f_reliable` (Hz)
+
+    τ          = (R1 max ∥ R2 max + R_s max) × (C_diode + C_pin + C_stray)
+    t_rise     = τ × ln( B_high / (B_high − VIH) )
+    t_fall     = τ × ln( (A − B_low) / (VIL − B_low) )
+    t_edge     = the larger of t_rise and t_fall
+    f_may_work = 1 / (2 × (t_edge + t_pulse_min))
+    f_reliable = f_may_work / margin_factor
+
+- B_high: the lowest pin voltage at `v_logic_high_min`. The rising edge starts at 0 V and heads for B_high.
+- A: the highest pin voltage at `v_input_max`. B_low: the highest pin voltage at `v_logic_low_max`. The falling edge starts at A and heads for B_low.
+- VIL = `vil_factor` × VDD, VIH = `vih_factor` × VDD.
+- τ always uses R1, R2 and R_s at their high tolerance, whichever corners A, B_high and B_low came from. The mix is deliberately on the slow side.
+- If B_high is not above VIH, or B_low is not below VIL, there is no limit: both values are `null` and `notes` says the pin never reads high (or low).
+
+Each edge is treated as a plain RC curve toward its final level. The frequency is at the pin, at 50 % duty.
+
+### Corners in the two examples
+
+| Quantity | Zener to GND | Schottky to rail |
+|---|---|---|
+| V_high and A (highest at `v_input_max`) | R1 min, R2 max, `v_max` | R1 min, R2 max, `v_max` |
+| B_high (lowest at `v_logic_high_min`) | R1 max, R2 min, `v_min` | R1 max, R2 min, `v_max` |
+| B_low (highest at `v_logic_low_max`) | R1 min, R2 max, `v_max` | R1 min, R2 max, `v_min` |
+| `analog_error` column | `v_min` | `v_min` |
+
+The Schottky column shows why all eight corners are solved: below VDD the rail diode leaks into the pin, so the leakiest column (`v_min`) gives the highest pin voltage there, and the least leaky (`v_max`) the lowest.
 
 ## The checker
 

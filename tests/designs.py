@@ -27,11 +27,20 @@ def table(currents_ma, v_min, v_typ, v_max):
             for i, lo, typ, hi in zip(currents_ma, v_min, v_typ, v_max)]
 
 
+# Table 8: VZ at IZ = 5 mA is 3.1 V minimum and 3.5 V maximum.
+C3V3_TABLE8_MA, C3V3_TABLE8_MIN_V, C3V3_TABLE8_MAX_V = 5, 3.10, 3.50
+
+
 def c3v3_reverse():
-    """Typical column from Fig. 7; minimum = typical - 0.2 V, maximum =
-    typical + 0.2 V (VZ is 3.1 to 3.5 V at 5 mA, Table 8)."""
-    return table(C3V3_CURRENT_MA, [x - 0.2 for x in C3V3_TYPICAL_V], C3V3_TYPICAL_V,
+    """Typical column from Fig. 7. The 5 mA row takes its minimum and maximum
+    from Table 8 (3.10 V and 3.50 V). Every other row is typical - 0.20 V and
+    typical + 0.20 V: half the width of the Table 8 band."""
+    rows = table(C3V3_CURRENT_MA, [x - 0.2 for x in C3V3_TYPICAL_V], C3V3_TYPICAL_V,
                  [x + 0.2 for x in C3V3_TYPICAL_V])
+    for row in rows:
+        if row["i_ma"] == C3V3_TABLE8_MA:
+            row["v_min"], row["v_max"] = C3V3_TABLE8_MIN_V, C3V3_TABLE8_MAX_V
+    return rows
 
 
 def bat54_forward():
@@ -52,9 +61,11 @@ def bat54_reverse():
 
 ZENER_NOTE = (
     "reverse: v_typ is Fig. 7 (typical working voltage against current, Tj = 25 C), "
-    "read from the graph to about +/-0.02 V. v_min = v_typ - 0.2 V and v_max = "
-    "v_typ + 0.2 V: Table 8 gives VZ 3.1 to 3.5 V at 5 mA only, and the same "
-    "+/-0.2 V is used at every current. 25 C only, no temperature spread. "
+    "read from the graph to about +/-0.02 V. 5 mA row: v_min 3.10 V and v_max "
+    "3.50 V are Table 8 (VZ at IZ = 5 mA), so that row is v_typ - 0.18 V and "
+    "v_typ + 0.22 V. Every other row: v_min = v_typ - 0.20 V and v_max = v_typ + "
+    "0.20 V, half the width of the Table 8 band; the data sheet gives no limits "
+    "away from 5 mA. 25 C only, no temperature spread. "
     "Table 8 IR max (5 uA at VR = 1 V) is leakier than v_min here (about "
     "1.5 uA at 1 V) and is not folded in. forward: empty, not modelled (Table 7 "
     "gives one point, VF max 0.9 V at 10 mA). capacitance: Cd max at VR = 0 V, "

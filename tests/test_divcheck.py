@@ -39,12 +39,12 @@ class TestSummary:
         divcheck.main([ZENER])
         out = capsys.readouterr().out
         lines = {line.split()[0]: line.split() for line in out.splitlines() if line.strip()}
-        assert lines["pin_max_safe"][1:] == ["PASS", "3.219", "V", "limit", "3.600", "V"]
+        assert lines["pin_max_safe"][1:] == ["PASS", "3.224", "V", "limit", "3.600", "V"]
         assert lines["logic_high"][1:4] == ["FAIL", "1.817", "V"]
         assert lines["analog_error"][1] == "info"
         assert lines["f_may_work"][1] == "none"
         assert "The pin never reads high" in out
-        assert "Max Input         30.000    2.820    3.020    3.219" in out
+        assert "Max Input         30.000    2.825    3.020    3.224" in out
         assert "No forward data: forward conduction is not modelled" in out
         assert "Not yet checked against the data sheet: clamp diode, MCU" in out
         assert "R1 10 kohm, R2 18 kohm, no R_s" in out

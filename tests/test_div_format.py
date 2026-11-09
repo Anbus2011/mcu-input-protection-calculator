@@ -76,6 +76,17 @@ class TestExamples:
         assert (z["type"], z["anode"], z["cathode"]) == ("zener", "gnd", "node")
         assert (s["type"], s["anode"], s["cathode"]) == ("schottky", "node", "vdd")
 
+    def test_format_doc_quotes_the_stored_analog_range_value(self):
+        """docs/div_v2_format.md explains why this check is TIGHT, not FAIL."""
+        data = read_json(example_path("schottky_rail_bat54cv.div"))
+        check = next(c for c in data["results"]["checks"] if c["id"] == "analog_range")
+        assert check == {"id": "analog_range", "status": "TIGHT", "value": 3.301258,
+                         "limit": 3.3, "unit": "V"}
+        assert 3.3 < 5.1 * 18.18 / 28.08 < data["mcu"]["v_recommended_max"]
+        with open(os.path.join(ROOT, "docs", "div_v2_format.md"), encoding="utf-8") as f:
+            doc = f.read()
+        assert "`value` 3.301258 V against `limit` 3.3 V" in doc
+
     def test_results_div_is_gone_or_rejected(self):
         """No v1 converter: a v1 file gets one clear message."""
         problems = validate(copy.deepcopy(V1_FILE))
