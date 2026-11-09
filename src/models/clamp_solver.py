@@ -171,9 +171,10 @@ def table_problems(rows) -> list:
             elif x <= 0:
                 out.append((f"[{i}].{key}", "must be greater than 0"))
             else:
-                cells[key] = x
                 if key in previous and x <= previous[key]:
                     out.append((f"[{i}].{key}", "must be greater than in the row above"))
+                else:
+                    cells[key] = x          # sound so far: compared across the row
                 previous[key] = x
         bad = set()
         for lo, hi in (("v_min", "v_typ"), ("v_typ", "v_max"), ("v_min", "v_max")):
@@ -198,7 +199,7 @@ VDD = "mcu.vdd"
 VIN_MAX = "system.v_input_max"
 
 
-def _lookup(design, path: str):
+def lookup(design, path: str):
     node = design
     for part in path.split("."):
         if not isinstance(node, dict):
@@ -216,7 +217,7 @@ def _clean(design) -> tuple:
         v[name] = value
         cause[name] = [] if value is not None else list(paths)
 
-    raw = {p: _lookup(design, p) for p in NUMBER_RULES}
+    raw = {p: lookup(design, p) for p in NUMBER_RULES}
     num = {p: (x if x is not None and number_problem(p, x) is None else None)
            for p, x in raw.items()}
     for paths, test, _message, blame in CROSS_RULES:
@@ -226,7 +227,7 @@ def _clean(design) -> tuple:
                 num[p] = None
 
     def resistance(name):
-        value, unit = num[f"resistors.{name}.value"], _lookup(design, f"resistors.{name}.unit")
+        value, unit = num[f"resistors.{name}.value"], lookup(design, f"resistors.{name}.unit")
         if value is None:
             return None, [f"resistors.{name}.value"]
         if not isinstance(unit, str) or unit not in RESISTOR_UNITS:
@@ -245,13 +246,13 @@ def _clean(design) -> tuple:
             p = f"resistors.{name}.{key}"
             put(p, num[p], [p])
 
-    anode, cathode = _lookup(design, "clamp_diode.anode"), _lookup(design, "clamp_diode.cathode")
+    anode, cathode = lookup(design, "clamp_diode.anode"), lookup(design, "clamp_diode.cathode")
     bad = wiring_problems(anode, cathode)
     paths = [f"clamp_diode.{n}" for n, x in (("anode", anode), ("cathode", cathode))
              if x is None or n in bad]
     put(WIRING, None if paths else (anode, cathode), paths)
 
-    tables = {t: _lookup(design, f"clamp_diode.{t}") for t in TABLES}
+    tables = {t: lookup(design, f"clamp_diode.{t}") for t in TABLES}
     problems = {t: table_problems(tables[t]) for t in TABLES}
     for col in COLUMNS:
         curves, paths = {}, []
@@ -530,7 +531,8 @@ def solve(design) -> dict:
          "info":     [{"id", "value", "unit"}, ...]      (no status),
          "voltages": {"vil", "vih", "levels": {id: {"v_in", "typ", "low", "high"}}},
          "needs_input": key paths of the blank or unusable inputs some result needs,
-         "warnings": [text, ...],
+         "notes":    [text, ...]   why a result has no value (pin never reads high),
+         "warnings": [text, ...]   solves that did not settle,
          "details":  every other number the screens show (DETAIL_KEYS),
          "missing":  {result name: [key paths it is waiting for]}}
 
@@ -567,7 +569,7 @@ def solve(design) -> dict:
     v_rec_max, v_abs_max = v["mcu.v_recommended_max"], v["mcu.v_absolute_max"]
 
     for t in TABLES:
-        rows = _lookup(design, f"clamp_diode.{t}")
+        rows = lookup(design, f"clamp_diode.{t}")
         d[f"{t}_modelled"] = bool(rows) if isinstance(rows, list) else None
 
     # ── Divider network ──────────────────────────────────────────────────
@@ -848,6 +850,7 @@ def solve(design) -> dict:
         "info": info,
         "voltages": {"vil": vil, "vih": vih, "levels": levels},
         "needs_input": [p for i, p in enumerate(needs_input) if p not in needs_input[:i]],
+        "notes": [note] if note else [],
         "warnings": warnings,
         "details": d,
         "missing": missing,
