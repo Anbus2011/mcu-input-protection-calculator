@@ -14,7 +14,7 @@ class TestRcFilterBasics:
     def setup_method(self):
         # 100 ohm, 108 pF total (95 + 10 + 3)
         self.params = BandwidthParams(
-            r_series_ohms=100, c_diode_pf=95, c_pin_pf=10, c_stray_pf=3,
+            r_tau_ohms=100, c_diode_pf=95, c_pin_pf=10, c_stray_pf=3,
             vil_v=0.99, vih_v=2.31, v_high=3.3,
             f_peripheral_mhz=170, n_samples=3,
             counter_bits=16, counter_signed=False, f_read_hz=1000,
@@ -52,7 +52,7 @@ class TestRcFilterBasics:
 class TestThresholdTiming:
     def setup_method(self):
         self.params = BandwidthParams(
-            r_series_ohms=100, c_diode_pf=95, c_pin_pf=10, c_stray_pf=3,
+            r_tau_ohms=100, c_diode_pf=95, c_pin_pf=10, c_stray_pf=3,
             vil_v=0.99, vih_v=2.31, v_high=3.3,
             f_peripheral_mhz=170, n_samples=3,
             counter_bits=16, counter_signed=False, f_read_hz=1000,
@@ -82,7 +82,7 @@ class TestThresholdTiming:
 class TestFrequencyLimits:
     def setup_method(self):
         self.params = BandwidthParams(
-            r_series_ohms=100, c_diode_pf=95, c_pin_pf=10, c_stray_pf=3,
+            r_tau_ohms=100, c_diode_pf=95, c_pin_pf=10, c_stray_pf=3,
             vil_v=0.99, vih_v=2.31, v_high=3.3,
             f_peripheral_mhz=170, n_samples=3,
             counter_bits=16, counter_signed=False, f_read_hz=1000,
@@ -119,7 +119,7 @@ class TestFrequencyLimits:
     def test_counter_overflow_signed(self):
         """Signed 16-bit at 1kHz read: 2^15 * 1000 = 32,768,000."""
         p = BandwidthParams(
-            r_series_ohms=100, c_diode_pf=95, c_pin_pf=10, c_stray_pf=3,
+            r_tau_ohms=100, c_diode_pf=95, c_pin_pf=10, c_stray_pf=3,
             vil_v=0.99, vih_v=2.31, v_high=3.3,
             f_peripheral_mhz=170, n_samples=3,
             counter_bits=16, counter_signed=True, f_read_hz=1000,
@@ -130,10 +130,14 @@ class TestFrequencyLimits:
 
 class TestEdgeCases:
     def test_zero_resistance(self):
-        """Zero resistance should return safely without division by zero."""
-        p = BandwidthParams(r_series_ohms=0)
+        """Zero resistance should return safely without division by zero.
+        (Rewritten: tau used to be reported as 0, a fake value; it is now
+        'not computable', and the capacitances are given explicitly instead
+        of relying on hidden dataclass defaults.)"""
+        p = BandwidthParams(r_tau_ohms=0, c_diode_pf=95, c_pin_pf=10, c_stray_pf=3)
         r = calculate_bandwidth(p)
-        assert r.tau_ns == 0
+        assert r.tau_ns is None
+        assert "r_tau_ohms" in r.missing["tau"]
 
     def test_zero_capacitance(self):
         p = BandwidthParams(c_diode_pf=0, c_pin_pf=0, c_stray_pf=0)
@@ -143,7 +147,7 @@ class TestEdgeCases:
     def test_invalid_thresholds_no_crash(self):
         """VIH > V_high should not crash."""
         p = BandwidthParams(
-            r_series_ohms=100, c_diode_pf=100, c_pin_pf=10, c_stray_pf=0,
+            r_tau_ohms=100, c_diode_pf=100, c_pin_pf=10, c_stray_pf=0,
             vil_v=1.0, vih_v=5.0, v_high=3.3,
         )
         r = calculate_bandwidth(p)

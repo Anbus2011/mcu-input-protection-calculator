@@ -115,7 +115,8 @@ class TestFullCalculation:
             ptot_mw=265.0,
         )
         self.mcu = McuParams(vdd=3.3, v_recommended_max=3.6,
-                             v_absolute_max=4.0, safe_injection_ma=1.0)
+                             v_absolute_max=4.0, safe_injection_ma=1.0,
+                             adc_bits=12, vil_factor=0.3, vih_factor=0.7)
         self.system = SystemParams(v_input_max=30, v_analog_fullscale=5.1,
                                    v_logic_high_min=3.8, v_logic_low_max=1.0)
 
@@ -216,10 +217,11 @@ class TestFullCalculation:
         assert len(r.plot_data["v_in"]) == 200
 
     def test_resolution(self):
+        """Rewritten for bug 10: resolution is VREF / 2^N (was VDD / 4095)."""
         r = calculate_all(self.resistors, self.zener, self.mcu, self.system)
-        # resolution = VDD / 4095 * 1000 / k
-        expected = 3.3 / 4095 * 1000 / r.k_nominal
-        assert abs(r.resolution_mv_per_lsb - expected) < 0.01
+        # resolution = VREF / 2^12 * 1000 / k, VREF = VDD
+        expected = 3.3 / 4096 * 1000 / r.k_nominal
+        assert abs(r.resolution_mv_per_lsb - expected) < 1e-9
 
 
 # ── results.div cross-check ──────────────────────────────────────────────────
@@ -269,19 +271,28 @@ class TestResultsDivFile:
 
 # ── Edge cases ────────────────────────────────────────────────────────────────
 
+C3V3 = dict(vz_nom=3.3, vz_min=3.1, vz_max=3.5, izt_ma=5.0, izk_ma=1.0,
+            zzt_typ=85.0, zzt_max=95.0, zzk_typ=350.0, zzk_max=600.0, ptot_mw=265.0)
+
+
 class TestEdgeCases:
     def test_zero_resistors_returns_empty(self):
-        """R1=0 or R2=0 should return a zeroed result without crashing."""
+        """R1=0 or R2=0 should return an empty result without crashing.
+        (Rewritten for bug 4: results used to be zeros, which the screen
+        showed as real values; they are now None = 'needs input'.)"""
         r = calculate_all(
             ResistorParams(r1_ohms=0, r2_ohms=18000),
             ZenerParams(), McuParams(), SystemParams(),
         )
-        assert r.k_nominal == 0
+        assert r.k_nominal is None
+        assert "resistors.r1_ohms" in r.missing["divider"]
 
     def test_no_zener_clamping_at_low_voltage(self):
-        """At 1V input, divider output is well below Zener — no clamping."""
+        """At 1V input, divider output is well below Zener — no clamping.
+        (Rewritten for bug 5: the Zener used to get IZT/IZK/ZZT from hidden
+        dataclass defaults; they are now given explicitly.)"""
         res = ResistorParams(r1_ohms=10000, r2_ohms=10000)
-        z = ZenerParams(vz_nom=3.3)
+        z = ZenerParams(**C3V3)
         mcu = McuParams(vdd=3.3)
         sys = SystemParams(v_input_max=1.0)
         r = calculate_all(res, z, mcu, sys)

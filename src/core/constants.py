@@ -52,11 +52,6 @@ ZENER_PRESETS = {
         "izt_ma": 5, "zzt_typ": 6, "zzt_max": 10,
         "zzk_typ": 40, "zzk_max": 150, "izk_ma": 1, "ptot_mw": 265
     },
-    "Custom": {
-        "vz_nom": 3.3, "vz_min": 3.1, "vz_max": 3.5, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 85, "zzt_max": 95,
-        "zzk_typ": 350, "zzk_max": 600, "izk_ma": 1, "ptot_mw": 265
-    }
 }
 
 # ============================================================================
@@ -72,35 +67,45 @@ ADC_SAMPLE_THRESHOLDS = [
 ADC_SAMPLE_DEFAULT = 247.5
 
 # ============================================================================
-# APPLICATION DEFAULTS
+# ZENER PRESET COMBOBOX
 # ============================================================================
-DEFAULT_VALUES = {
-    "resistors": {
-        "r1": {"value": 10, "unit": "k\u03a9", "rating_mw": 200, "tolerance_pct": 1},
-        "r2": {"value": 18, "unit": "k\u03a9", "rating_mw": 100, "tolerance_pct": 1},
-        "r_series": {"value": 0, "unit": "\u03a9", "rating_mw": None, "tolerance_pct": None},
-    },
-    "zener": {
-        "preset": "BZB984-C3V3",
-        "vz_nom": 3.3, "vz_min": 3.1, "vz_max": 3.5, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 85, "zzt_max": 95,
-        "zzk_typ": 350, "zzk_max": 600, "izk_ma": 1, "ptot_mw": 265,
-    },
-    "mcu": {
-        "vdd": 3.3, "vdda": 3.3, "vref": 3.3,
-        "v_recommended_max": 3.6, "v_absolute_max": 4.0,
-        "safe_injection_ma": 1.0,
-    },
-    "system": {
-        "v_input_max": 30, "v_analog_fullscale": 5.1,
-        "v_logic_high_min": 3.8, "v_logic_low_max": 1.0,
-    },
-    "bandwidth": {
-        "r_series_bw": 100, "c_diode_pf": 95, "c_pin_pf": 10, "c_stray_pf": 3,
-        "vil": 0.99, "vih": 2.31,
-        "f_peripheral_mhz": 170, "n_samples": 3,
-        "counter_bits": 16, "counter_signed": False, "f_read_hz": 1000,
-    },
+# "Custom" is not a part: choosing it keeps the values already in the fields.
+CUSTOM_PRESET = "Custom"
+
+# ============================================================================
+# RESISTOR UNITS
+# ============================================================================
+RESISTOR_UNITS = {"Ω": 1.0, "kΩ": 1e3, "MΩ": 1e6}
+
+# Units shown in the unit selectors of a new, blank design (visible, and they
+# have no effect until a value is typed).
+NEW_DESIGN_UNITS = {"r1": "kΩ", "r2": "kΩ", "rs": "Ω"}
+
+# ============================================================================
+# SIGNAL BANDWIDTH STARTING VALUES
+# ============================================================================
+# These are the only values the app ever puts in a field by itself: a new
+# design starts with them in the Signal Bandwidth fields, and the
+# "Fill from starting values" button puts them back into blank or unreadable
+# bandwidth fields. They are always visible in the fields. Every other input
+# starts blank.
+BANDWIDTH_STARTING_VALUES = {
+    # Nexperia BZB984 series datasheet Rev 3, Table 8: Cd max 450 pF for C3V3 (f = 1 MHz, VR = 0 V)
+    "c_diode_pf": 450,
+    # STM32G484 datasheet DS12983 Rev 5, Table 54: CIO 5 pF typ (no max given); 10 pF = 2x typ as margin
+    "c_pin_pf": 10,
+    # Engineering estimate for a short PCB trace (2-5 pF typical); no datasheet source
+    "c_stray_pf": 3,
+    # STM32G484 datasheet DS12983 Rev 5, Table 17: fHCLK / fPCLK1 / fPCLK2 max 170 MHz
+    "f_peripheral_mhz": 170,
+    # Original project value, no datasheet source: set to your timer input filter's N
+    "n_samples": 3,
+    # STM32G484 datasheet DS12983 Rev 5, Table 7: TIM1/3/4/8/20 counters are 16-bit
+    "counter_bits": 16,
+    # Original project value: TIMx up-counter used as an unsigned count
+    "counter_signed": False,
+    # Original project value, no datasheet source: firmware counter read rate
+    "f_read_hz": 1000,
 }
 
 # ============================================================================

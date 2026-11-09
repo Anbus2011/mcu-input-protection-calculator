@@ -35,7 +35,8 @@ V_input (0-30V) ──┬── R1 ──┬── R_series ──> MCU GPIO Pin
 - **Safety margin analysis** - checks against MCU recommended max, absolute max, and injection current limits
 - **Signal bandwidth / PPS analysis** - determines maximum pulse frequency through the protection network
 - **Interactive plot** - V_mcu vs V_input with typical and worst-case traces, dark/light theme toggle
-- **File save/load** - JSON-based `.div` format preserves complete design state
+- **File save/load** - JSON-based `.div` format preserves complete design state; atomic saves, validated loads
+- **No hidden defaults** - blank inputs stay blank; results that need them say "needs input"
 - **Built-in Zener presets** - BZB984 series (Nexperia) with full datasheet parameters
 - **ADC sample time lookup** - automatic minimum sample cycle recommendation (STM32G4)
 - **Color-coded status indicators** - green/orange/red pass/fail throughout all tables
@@ -109,26 +110,32 @@ A launch configuration is included. Open the project folder in VS Code, then pre
 The window is split into two panels:
 
 - **Left panel** (scrollable) - all input parameters
-- **Right panel** - output tabs and plot
+- **Right panel** - an input report line, the output tabs and the plot
+
+### No Hidden Defaults
+
+The app starts with a blank design, and **New Design** gives a blank design. Nothing is ever filled in behind your back:
+
+- A blank field stays blank. Every result that needs it shows **needs input**, and the report line above the tabs lists the fields that are needed (for example `Needs input: R1 value, VDD/VDDA`).
+- Results that don't depend on a blank field are still calculated.
+- Text that isn't a valid number, or a value out of range (negative resistance, tolerance outside 0 to below 100 %, VZ min > VZ nom > VZ max, IZK not below IZT, a rating or Ptot of 0, ...), is listed as `Fix: <field>: <reason>`, and results that depend on it show **needs input**.
+- Unreadable text blocks Save until it's fixed or cleared; the error names the field.
+- The only values the app fills in itself are visible ones: the Signal Bandwidth starting values (see below) and the values of a Zener preset you pick. A new design also shows kΩ / kΩ / Ω in the unit selectors.
 
 ### Input Panels
 
 #### Resistors
 
 Enter values for R1, R2, and the optional R_series. Each resistor has:
-- **Value** with unit selector (Ohm or kOhm)
+- **Value** with unit selector (Ω, kΩ or MΩ)
 - **Power rating** (mW) - used to calculate margin percentage
 - **Tolerance** (%) - used for worst-case analysis
 
-| Default | Value |
-|---------|-------|
-| R1 | 10 kOhm, 200 mW, 1% |
-| R2 | 18 kOhm, 100 mW, 1% |
-| R_series | 0 Ohm |
+R_series blank or 0 means there is no series resistor; its unit, rating and tolerance are then not needed. When R_series is above 0 the report line also mentions a blank R_s rating or tolerance (no result uses them yet).
 
 #### Zener Diode
 
-Select a preset from the dropdown or choose **Custom** to enter your own parameters. The BZB984 series presets (Nexperia) are built in:
+Select a preset from the dropdown. The BZB984 series presets (Nexperia BZB984 datasheet Rev 3, Table 8) are built in:
 
 | Preset | VZ_nom |
 |--------|--------|
@@ -142,25 +149,28 @@ Select a preset from the dropdown or choose **Custom** to enter your own paramet
 | BZB984-C5V6 | 5.6V |
 | BZB984-C6V2 | 6.2V |
 
-Each preset populates: VZ (nom/min/max), IZT, IZK, ZZT (typ/max), ZZK (typ/max), and Ptot.
+Each preset fills: VZ (nom/min/max), IZT, IZK, ZZT (typ/max), ZZK (typ/max), and Ptot. As soon as any value differs from the preset, the selector shows **Custom** with "modified from <preset>", and the design is saved as `"preset": "Custom"` with `"preset_base": "<preset>"`. Changing the value back shows the preset again. Choosing **Custom** keeps the values that are in the fields.
 
 #### MCU Pin Input Limits
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| VDD/VDDA | 3.3V | MCU supply voltage |
-| Safe Max | 3.6V | Recommended maximum (VDDA + 0.3V) |
-| Abs. Max | 4.0V | Absolute maximum (damage threshold) |
-| Injection Limit | 1.0 mA | Maximum safe ESD clamp current |
+| Parameter | Description |
+|-----------|-------------|
+| VDD/VDDA | MCU supply voltage; also used as the ADC reference (VREF) |
+| Safe Max | Recommended maximum (VDDA + 0.3V) |
+| Abs. Max | Absolute maximum (damage threshold) |
+| Injection Limit | Maximum safe ESD clamp current |
+| ADC bits | ADC resolution N (STM32G4: 12) |
+| VIL factor | Pin input-low threshold as a fraction of VDD (STM32G4: 0.3, DS12983 Rev 5, Table 54) |
+| VIH factor | Pin input-high threshold as a fraction of VDD (STM32G4: 0.7, DS12983 Rev 5, Table 54) |
 
 #### System Requirements
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| Max Input | 30V | Maximum signal voltage at the divider input |
-| ADC Scale | 5.1V | External voltage that maps to ADC full scale |
-| Logic High | 3.8V | Minimum input voltage that must read as logic high |
-| Logic Low | 1.0V | Maximum input voltage that must read as logic low |
+| Parameter | Description |
+|-----------|-------------|
+| Max Input | Maximum signal voltage at the divider input |
+| ADC Scale | External voltage that maps to ADC full scale |
+| Logic High | Minimum input voltage that must read as logic high |
+| Logic Low | Maximum input voltage that must read as logic low |
 
 #### Design Notes
 
@@ -170,7 +180,7 @@ Free-form text area for annotations. Saved with the `.div` file.
 
 #### Tab 1: Component Analysis
 
-- **Divider Network** - input impedance, divider ratio, ADC source impedance, total power dissipation
+- **Divider Network** - input impedance, divider ratio, ADC source impedance (R1∥R2 + R_s), total power dissipation
 - **Component Power** - current, power, rating, and margin % for R1, R2, and Zener at max input
 - **Voltage at MCU Pin** - typical and worst-case V_mcu at maximum input voltage
 
@@ -183,7 +193,7 @@ Margin indicators:
 
 - **Voltage Limits** - V_mcu vs Safe Max and Absolute Max with margin in mV and pass/fail status
 - **Injection Current** - estimated current into ESD clamp vs the safe limit
-- **ADC Performance** - source impedance, recommended minimum sample cycles (STM32G4), and resolution in mV/LSB
+- **ADC Performance** - source impedance, recommended minimum sample cycles (STM32G4), and resolution in mV/LSB (VREF / 2^N referred to the divider input)
 
 #### Tab 3: Input Levels
 
@@ -192,21 +202,32 @@ Operating point table showing the MCU pin voltage at five key input levels:
 | Level | Check |
 |-------|-------|
 | 0V | Zero reference |
-| Logic Low | V_mcu must be below VIL (0.3 x VDD) |
-| Logic High | V_mcu must be above VIH (0.7 x VDD) |
+| Logic Low | V_mcuH must be below VIL (VIL factor x VDD) |
+| Logic High | V_mcuL must be above VIH (VIH factor x VDD) |
 | ADC Scale | V_mcu must not exceed VDD |
 | Max Input | V_mcu must not exceed Absolute Max |
 
 Each row shows both **V_mcuL** (lowest, from R1 high / R2 low / typical Zener) and **V_mcuH** (highest, from R1 low / R2 high / worst Zener).
 
+If the Zener solver doesn't settle (the last iteration still moves the node by more than 1 mV, or the result leaves the physical range, which happens with very low-value dividers), the report line says so and names the input levels affected.
+
 #### Tab 4: Signal Bandwidth
 
-Analyzes the RC low-pass filter formed by the protection network to determine the maximum signal frequency the MCU pin can reliably detect. Enter:
+Analyzes the RC low-pass filter formed by the protection network to determine the maximum signal frequency the MCU pin can reliably detect.
 
-- **R_series**, **C_diode** (junction capacitance), **C_pin** (GPIO capacitance), **C_stray** (PCB estimate)
-- **VIL** and **VIH** thresholds from the MCU datasheet
+Shown read-only, derived from the other panels:
+
+- **τ resistance** = R1∥R2 + R_series
+- **VIL** = VIL factor x VDD, **VIH** = VIH factor x VDD
+- **V_high** = the lowest solved pin voltage at the Logic High input (R1 max, R2 min, typical Zener)
+
+Entered on the tab:
+
+- **C_diode** (junction capacitance at 0 V), **C_pin** (GPIO capacitance), **C_stray** (PCB estimate)
 - **Peripheral clock** and **digital filter samples** for digital sampling limit
 - **Counter width**, **signedness**, and **firmware read rate** for overflow limit
+
+These fields start from visible starting values (see `BANDWIDTH_STARTING_VALUES` below). **Fill from starting values** puts the starting value back into any blank or unreadable bandwidth field and leaves the others alone.
 
 Results show four frequency limits and the effective maximum PPS:
 
@@ -215,9 +236,9 @@ Results show four frequency limits and the effective maximum PPS:
 | Analog (conservative) | 1 / (10 x tau) |
 | Analog (practical) | 1 / (2 x t_vih) |
 | Digital sampling | 1 / (2 x (t_undefined + t_pulse_min)) |
-| Counter overflow | 2^(bits) x f_read |
+| Counter overflow | 2^N x f_read (unsigned), 2^(N-1) x f_read (signed) |
 
-The **effective limit** is the minimum of all four, with the bottleneck identified.
+The **effective limit** is the minimum of all four, with the bottleneck identified. It is shown only when all four are known. If V_high never reaches VIH, the tab says so and shows no threshold-based or effective limit.
 
 ### Plot
 
@@ -229,24 +250,30 @@ The bottom of the right panel shows **V_mcu vs V_input**:
 - **Gold dashed** - Safe Max threshold
 - **Red dashed** - Absolute Max threshold
 
+Each curve and line is drawn only when its inputs are present. When neither curve can be calculated, the plot is cleared and says which inputs are needed.
+
 Use the **Theme** dropdown to switch between Dark and Light plot styles.
 
 ### File Operations
 
 | Action | Shortcut | Description |
 |--------|----------|-------------|
-| New | Ctrl+N | Reset all inputs to defaults |
+| New | Ctrl+N | Blank design (bandwidth fields get their starting values) |
 | Open | Ctrl+O | Load a `.div` file |
 | Save | Ctrl+S | Save to current file |
 | Save As | Ctrl+Shift+S | Save to a new file |
 
-The title bar shows the current filename and an asterisk (*) when there are unsaved changes. The application prompts to save before closing, opening, or creating a new file.
+The title bar shows the current filename and an asterisk (*) when there are unsaved changes. Any edit to any input (typing, paste, cut, delete, the notes, the checkbox, the selectors) marks the design unsaved. The application prompts to save before closing, opening, or creating a new file.
+
+- Saving writes a temporary file and then replaces the target, so a failed save never truncates the existing file. Save and Save As both report a failure.
+- Opening checks the whole file first. Malformed data (wrong type, non-numeric text, unknown unit, broken structure) is rejected with an error that names the field, and the current design is left exactly as it was.
+- Missing or null fields load blank, with one warning listing them. Files from before the ADC bits, VIL/VIH factor and bandwidth fields existed (format "1.0", such as `results.div`) still load; those fields are blank.
 
 ---
 
 ## File Format
 
-Designs are saved as `.div` files (JSON). Example:
+Designs are saved as `.div` files (JSON). Blank fields are saved as `null`. Units are `"Ω"`, `"kΩ"` or `"MΩ"` (written as `Ω` escapes). Example:
 
 ```json
 {
@@ -254,59 +281,62 @@ Designs are saved as `.div` files (JSON). Example:
   "created": "2026-02-01T14:58:49.721771",
   "notes": "Test design for 4.7k/20k divider",
   "resistors": {
-    "r1": { "value": 4.7, "unit": "kOhm", "rating_mw": 200.0, "tolerance_pct": 1.0 },
-    "r2": { "value": 20.0, "unit": "kOhm", "rating_mw": 100.0, "tolerance_pct": 1.0 },
-    "r_series": { "value": 0.0, "unit": "Ohm", "rating_mw": null, "tolerance_pct": null }
+    "r1": { "value": 4.7, "unit": "kΩ", "rating_mw": 200.0, "tolerance_pct": 1.0 },
+    "r2": { "value": 20.0, "unit": "kΩ", "rating_mw": 100.0, "tolerance_pct": 1.0 },
+    "r_series": { "value": 0.0, "unit": "Ω", "rating_mw": null, "tolerance_pct": null }
   },
   "zener": {
-    "preset": "BZB984-C3V3",
-    "vz_nom": 3.3, "vz_min": 3.1, "vz_max": 3.5,
+    "preset": "Custom", "preset_base": "BZB984-C3V3",
+    "vz_nom": 3.3, "vz_min": 3.1, "vz_max": 3.6, "tolerance_pct": 5,
     "izt_ma": 5.0, "zzt_typ": 85.0, "zzt_max": 95.0,
-    "zzk_typ": 350.0, "zzk_max": 600.0, "izk_ma": 1.0, "ptot_mw": 265.0
+    "izk_ma": 1.0, "zzk_typ": 350.0, "zzk_max": 600.0, "ptot_mw": 265.0
   },
   "mcu": {
-    "vdd": 3.3, "v_recommended_max": 3.6,
-    "v_absolute_max": 4.0, "safe_injection_ma": 1.0
+    "vdd": 3.3, "vdda": 3.3, "vref": 3.3,
+    "v_recommended_max": 3.6, "v_absolute_max": 4.0, "safe_injection_ma": 1.0,
+    "adc_bits": 12, "vil_factor": 0.3, "vih_factor": 0.7
   },
   "system": {
     "v_input_max": 30.0, "v_analog_fullscale": 5.1,
     "v_logic_high_min": 3.8, "v_logic_low_max": 1.0
+  },
+  "bandwidth": {
+    "c_diode_pf": 450, "c_pin_pf": 10, "c_stray_pf": 3,
+    "f_peripheral_mhz": 170, "n_samples": 3,
+    "counter_bits": 16, "counter_signed": false, "f_read_hz": 1000
   }
 }
 ```
+
+`preset_base` is set only when the values were edited after picking a preset. `"vdda"` and `"vref"` are written as copies of `"vdd"` and ignored when loading.
 
 ---
 
 ## Project Structure
 
 ```
-Resistor_Calculator/
+mcu_input_calculator/
 ├── main.py                       # Application entry point
 ├── requirements.txt              # Python dependencies
 ├── README.md
+├── results.div                   # Sample design (format 1.0)
 │
 ├── src/
 │   ├── core/
-│   │   ├── constants.py          # Zener presets, ADC tables, defaults
-│   │   └── app_state.py          # Controller: file I/O, dirty tracking, recalc dispatch
+│   │   ├── constants.py          # Zener presets, ADC tables, bandwidth starting values
+│   │   └── app_state.py          # Controller: field parsing, file I/O, dirty tracking, recalc dispatch
 │   │
 │   ├── models/
 │   │   ├── circuit_model.py      # DC analysis engine (pure math, no UI)
 │   │   └── bandwidth_model.py    # AC bandwidth / PPS analysis engine
 │   │
 │   └── ui/
-│       ├── main_window.py        # Top-level window, menu, layout
+│       ├── main_window.py        # Top-level window, toolbar, layout
 │       ├── input_panels.py       # Resistor, Zener, MCU, System, Bandwidth input panels
 │       ├── output_panels.py      # Component, Safety, Operating, Bandwidth result tabs
 │       └── plot_canvas.py        # Matplotlib V_mcu vs V_input chart
 │
-├── div/                          # Example .div design files
-│   ├── test1.div
-│   └── test2.div
-│
-├── MD_Files/                     # Project documentation
-│   ├── stm32_divider_calculator_project.md
-│   └── stm32_divider_calculator_project_with_PPS.md
+├── tests/                        # pytest suite (python -m pytest tests/ -v)
 │
 └── .vscode/
     └── launch.json               # VS Code debug configuration
@@ -316,15 +346,15 @@ Resistor_Calculator/
 
 The application follows a **Model-View-Controller** pattern:
 
-- **Models** (`src/models/`) contain pure calculation logic with no UI dependencies. All inputs are plain floats and dataclasses, all outputs are result dataclasses.
-- **View** (`src/ui/`) contains all CustomTkinter widgets. Input panels push values to the controller on change. Output panels receive result objects and update their display.
-- **Controller** (`src/core/app_state.py`) owns the state, triggers model recalculation, and dispatches results back to the view via callbacks.
+- **Models** (`src/models/`) contain pure calculation logic with no UI dependencies. Inputs are dataclasses whose fields may be `None` (blank); each output is calculated only when its inputs are present, and the missing inputs are reported per output.
+- **View** (`src/ui/`) contains all CustomTkinter widgets. Every input is bound to a Tk variable whose trace forwards the raw text to the controller. Output panels display the result objects; they don't parse or calculate.
+- **Controller** (`src/core/app_state.py`) owns the text of every field, parses and range-checks it, triggers model recalculation, derives the bandwidth inputs from the DC results, and dispatches results back to the view via callbacks.
 
 ---
 
-## Customizing Presets and Defaults
+## Customizing Presets and Starting Values
 
-All hardware presets and MCU defaults live in a single file: **`src/core/constants.py`**. No other files need to change when adding new components or targeting a different processor.
+All hardware presets and starting values live in a single file: **`src/core/constants.py`**. No other files need to change when adding new components or targeting a different processor.
 
 ### Adding or Replacing Zener Diodes
 
@@ -349,9 +379,6 @@ ZENER_PRESETS = {
         "izk_ma": 1,          # Knee current (mA) - onset of Zener breakdown
         "ptot_mw": 350        # Maximum power dissipation (mW)
     },
-
-    # "Custom" must always be the last entry
-    "Custom": { ... }
 }
 ```
 
@@ -366,13 +393,11 @@ ZENER_PRESETS = {
 | `zzk_typ` / `zzk_max` | "Dynamic impedance at IZK" (ZZK) |
 | `ptot_mw` | "Total power dissipation" (Ptot) at 25 deg C |
 
-To remove a preset, delete its block from the dictionary. The **"Custom"** entry should always remain as the last item -- it serves as the editable fallback.
+To remove a preset, delete its block from the dictionary. **Custom** is always offered in the dropdown; it is not an entry in `ZENER_PRESETS`.
 
 ### Changing the Target MCU
 
-The MCU-specific values are in two places within `constants.py`:
-
-**1. ADC Sample Time Lookup Table**
+**ADC Sample Time Lookup Table**
 
 The `ADC_SAMPLE_THRESHOLDS` list maps source impedance (ohms) to minimum ADC sample cycles. The defaults are for the **STM32G4** family. Replace with values from your MCU's datasheet (usually in the ADC electrical characteristics table):
 
@@ -401,80 +426,51 @@ ADC_SAMPLE_DEFAULT = 247.5  # Used when impedance exceeds all thresholds
 # ADC_SAMPLE_DEFAULT = 480
 ```
 
-**2. MCU Pin Limits (defaults)**
+The MCU pin limits, ADC bits and VIL/VIH factors are entered in the MCU panel for each design (they start blank) and are saved in the `.div` file.
 
-The `DEFAULT_VALUES["mcu"]` section sets what appears in the MCU input panel when the application starts or a new file is created:
+### Changing the Bandwidth Starting Values
+
+`BANDWIDTH_STARTING_VALUES` sets the values a new design shows in the Signal Bandwidth fields, and what **Fill from starting values** puts back. Keep a one-line source note above each value:
 
 ```python
-DEFAULT_VALUES = {
-    # ...
-    "mcu": {
-        "vdd": 3.3,                  # Supply voltage (V)
-        "vdda": 3.3,                 # Analog supply voltage (V)
-        "vref": 3.3,                 # ADC reference voltage (V)
-        "v_recommended_max": 3.6,    # VDD + 0.3V (safe operating limit)
-        "v_absolute_max": 4.0,       # Absolute max from datasheet
-        "safe_injection_ma": 1.0,    # Max ESD clamp current (mA)
-    },
-    # ...
+BANDWIDTH_STARTING_VALUES = {
+    # Nexperia BZB984 series datasheet Rev 3, Table 8: Cd max 450 pF for C3V3 (f = 1 MHz, VR = 0 V)
+    "c_diode_pf": 450,
+    # STM32G484 datasheet DS12983 Rev 5, Table 54: CIO 5 pF typ (no max given); 10 pF = 2x typ as margin
+    "c_pin_pf": 10,
+    # Engineering estimate for a short PCB trace (2-5 pF typical); no datasheet source
+    "c_stray_pf": 3,
+    # STM32G484 datasheet DS12983 Rev 5, Table 17: fHCLK / fPCLK1 / fPCLK2 max 170 MHz
+    "f_peripheral_mhz": 170,
+    # Original project value, no datasheet source: set to your timer input filter's N
+    "n_samples": 3,
+    # STM32G484 datasheet DS12983 Rev 5, Table 7: TIM1/3/4/8/20 counters are 16-bit
+    "counter_bits": 16,
+    # Original project value: TIMx up-counter used as an unsigned count
+    "counter_signed": False,
+    # Original project value, no datasheet source: firmware counter read rate
+    "f_read_hz": 1000,
 }
-```
-
-To target a **5V-tolerant** MCU (e.g., STM32F1), you might change these to:
-
-```python
-"mcu": {
-    "vdd": 3.3,
-    "vdda": 3.3,
-    "vref": 3.3,
-    "v_recommended_max": 5.0,    # 5V-tolerant pins
-    "v_absolute_max": 5.5,
-    "safe_injection_ma": 5.0,
-},
-```
-
-### Changing the Bandwidth / PPS Defaults
-
-The `DEFAULT_VALUES["bandwidth"]` section controls the starting values for the Signal Bandwidth tab. Adjust these for your specific MCU and protection diode:
-
-```python
-"bandwidth": {
-    "r_series_bw": 100,         # Series resistance in signal path (ohms)
-    "c_diode_pf": 95,           # Zener junction capacitance at 0V bias (pF)
-    "c_pin_pf": 10,             # MCU GPIO input capacitance (pF)
-    "c_stray_pf": 3,            # PCB parasitic capacitance estimate (pF)
-    "vil": 0.99,                # Input low threshold voltage (V)
-    "vih": 2.31,                # Input high threshold voltage (V)
-    "f_peripheral_mhz": 170,    # Peripheral clock frequency (MHz)
-    "n_samples": 3,             # Digital filter: min samples for valid edge
-    "counter_bits": 16,         # Hardware counter width (bits)
-    "counter_signed": False,    # True if counter is signed (+/-)
-    "f_read_hz": 1000,          # Firmware counter read rate (Hz)
-},
 ```
 
 **Key datasheet lookups:**
 
 | Parameter | Where to Find |
 |-----------|---------------|
-| `c_diode_pf` | Protection diode datasheet, "junction capacitance" at 0V reverse bias |
-| `c_pin_pf` | MCU datasheet, GPIO electrical specifications |
-| `vil` / `vih` | MCU datasheet, I/O DC characteristics (VIL max, VIH min) |
+| `c_diode_pf` | Protection diode datasheet, "diode capacitance" / "junction capacitance" at 0V reverse bias (use the max) |
+| `c_pin_pf` | MCU datasheet, I/O static characteristics (CIO) |
 | `f_peripheral_mhz` | MCU reference manual, clock tree diagram |
 | `n_samples` | MCU reference manual, timer/input capture digital filter settings |
 
-### Changing System Defaults
+---
 
-The `DEFAULT_VALUES["system"]` section sets the starting signal and threshold voltages:
+## Running the Tests
 
-```python
-"system": {
-    "v_input_max": 30,           # Maximum expected input voltage (V)
-    "v_analog_fullscale": 5.1,   # Input voltage that maps to ADC full-scale
-    "v_logic_high_min": 3.8,     # Input voltage that must read as logic HIGH
-    "v_logic_low_max": 1.0,      # Input voltage that must read as logic LOW
-},
+```bash
+python -m pytest tests/ -v
 ```
+
+`tests/test_ui.py` drives the real window (withdrawn), so it needs a desktop session.
 
 ---
 
@@ -485,5 +481,5 @@ The `DEFAULT_VALUES["system"]` section sets the starting signal and threshold vo
 | `ModuleNotFoundError: No module named 'customtkinter'` | Run `pip install -r requirements.txt` |
 | F5 does nothing in VS Code | Install the **Python** and **Python Debugger** extensions, then ensure `main.py` is the active file |
 | Window appears but is blank | Try resizing the window, or check the terminal for error messages |
-| `.div` file won't open | Ensure the file is valid JSON. Open it in a text editor to check for corruption |
+| `.div` file won't open | The error names the field that is wrong (for example `resistors.r1.unit`). Fix it in a text editor; units must be Ω, kΩ or MΩ |
 | Plot doesn't render | Verify `matplotlib` and `numpy` are installed: `pip show matplotlib numpy` |

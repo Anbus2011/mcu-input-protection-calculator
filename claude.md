@@ -11,6 +11,7 @@ This project uses a strict Controller/Model/View decoupled architecture.
 * **`src/ui/`**: CustomTkinter views. **NO math calculations.** Views capture input, send it to `AppState`, and listen for callbacks to update labels/plots.
 * **`src/core/app_state.py`**: The central controller. Handles file I/O (.div JSON format), dirty-tracking, and triggers the `CircuitModel` to recalculate.
 * **Rule:** Never embed calculation logic inside a UI button click or input callback. Always route through `AppState`.
+* **Rule: no hidden defaults.** The UI forwards the raw text of every field to `AppState`, which parses it. A blank field stays blank, and nothing substitutes a value the user can't see (no `.get(key, default)`, no dataclass defaults, no fallback numbers). Blank or unreadable text becomes `None`; every result that depends on it shows "needs input" (or is cleared, with the reason shown), and everything that doesn't depend on it still computes. The only values the app fills in by itself are visible ones: the Signal Bandwidth starting values in `constants.py` (each with a source note) and the fields of a Zener preset the user picks. R_s blank or 0 means no series resistor.
 
 ## 3. Circuit Topology
     V_input (0-30V) ──┬── R1 ──┬── R_series ──> MCU GPIO Pin
@@ -46,14 +47,16 @@ The protection network forms an RC low-pass filter.
   $$C_{total} = C_{diode} + C_{pin} + C_{stray}$$ 
   (Use C_diode at 0V bias for worst-case).
 * **Time Constant:**
-  $$\tau = R_{total} \times C_{total}$$
+  $$\tau = \left(\frac{R1 \times R2}{R1 + R2} + R_{series}\right) \times C_{total}$$
+* **Thresholds at the pin:** $V_{IL} = k_{VIL} \times VDD$ and $V_{IH} = k_{VIH} \times VDD$, where $k_{VIL}$ and $k_{VIH}$ are the MCU panel's VIL/VIH factor fields (STM32G4: 0.3 and 0.7, DS12983 Rev 5, Table 54).
+* **High level at the pin:** $V_{high}$ = the lowest solved pin voltage at the System panel's Logic High input voltage (V_mcuL: R1 max, R2 min, typical Zener, §4A/§4B). If $V_{high} \le V_{IH}$ the pin never reads high: the tab says so and shows no threshold-based limit and no effective limit.
 * **Threshold Crossing Time:** The time spent in the "undefined logic zone" between VIL and VIH:
   $$t_{undefined} = \tau \times \ln \left( \frac{V_{high} - V_{IL}}{V_{high} - V_{IH}} \right)$$
 * **Maximum Frequencies:**
   * **Analog Limit (99% swing):** $$f_{max\_analog} = \frac{1}{10 \times \tau}$$
   * **Digital Limit:** $$f_{max\_digital} = \frac{1}{2 \times (t_{undefined} + t_{pulse\_min})}$$
     *(where t_pulse_min = N_samples / f_peripheral_clock)*
-  * **Firmware Limit:** $$f_{max\_overflow} = 2^{(N_{bits} - 1)} \times f_{read}$$
+  * **Firmware Limit:** $$f_{max\_overflow} = 2^{N_{bits}} \times f_{read}$$ for an unsigned counter, $$2^{(N_{bits} - 1)} \times f_{read}$$ for a signed counter.
 * **Effective Max PPS:** The minimum of the three limits above.
 
 ### D. STM32 Specific Constants
@@ -76,10 +79,13 @@ After ANY code change, run the test suite before committing:
 python -m pytest tests/ -v
 ```
 
-All 60 tests must pass. The suite covers:
-* **Circuit model** (32 tests): Zener 3-region V-I model, ADC sample lookup, full divider calculation, Kirchhoff's current law balance, power sums, tolerance worst-case ratios, operating points, results.div cross-check, edge cases
-* **Bandwidth model** (17 tests): RC time constant, -3dB bandwidth, rise time, threshold timing formulas, all 4 frequency limits, counter overflow signed/unsigned, edge cases
-* **File I/O** (11 tests): Save/load round-trip, JSON format version, backwards compatibility with shipped results.div, minimal file loading, dirty tracking
+All 365 tests must pass. The suite covers:
+* **Circuit model** (`test_circuit_model.py`, 35 tests): Zener 3-region V-I model, ADC sample lookup, full divider calculation, Kirchhoff's current law balance, power sums, tolerance worst-case ratios, operating points, results.div cross-check, edge cases
+* **Bandwidth model** (`test_bandwidth_model.py`, 17 tests): RC time constant, -3dB bandwidth, rise time, threshold timing formulas, all 4 frequency limits, counter overflow signed/unsigned, edge cases
+* **File I/O** (`test_file_io.py`, 8 tests): Save/load round-trip, JSON format version, backwards compatibility with shipped results.div, minimal file loading, dirty tracking
+* **Model fixes** (`test_fixes_model.py`, 27 tests): reference case, one solver for results/operating points/plot (V_input max 5 V repro), solver "did not settle" warning, no results from missing inputs, no dataclass defaults, zero ratings, ADC bits (VREF / 2^N), VIL/VIH factors, V_high, "never reaches VIH" with no fallback
+* **AppState** (`test_fixes_app_state.py`, 104 tests): bandwidth derivation (τ resistance, VIL/VIH, V_high), bandwidth starting values / save / load / fill, every field marks unsaved, blank design, "needs input" and unused blanks, range checks, R_s rules, unreadable text blocks Save, atomic save, file validation (null, missing, malformed, Ω/kΩ/MΩ), change tracking after a failed load, preset "modified" / Custom + preset_base
+* **UI** (`test_ui.py`, 174 tests; needs a desktop session): drives the real, withdrawn window through its widgets: change tracking on every input (typing, paste, cut, delete, notes, checkbox, comboboxes), blank / 0 / unreadable on every numeric field, New Design clearing everything, both save-failure messages, preset shown as modified, results.div giving bandwidth outputs, plot clearing, failed loads
 
 If a test fails after your change, fix the issue before committing. Do not skip or delete tests.
 

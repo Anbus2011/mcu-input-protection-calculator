@@ -15,27 +15,19 @@ class TestFileRoundTrip:
     """Save state -> load it back -> verify values match."""
 
     def test_save_and_reload(self):
+        # Rewritten: the old version set model parameters and "display"
+        # values separately, which let them disagree (bug 5). Inputs now go
+        # through set_field, the same path the UI uses.
         s = AppState()
-        s.resistors.r1_ohms = 4700
-        s.resistors.r2_ohms = 20000
-        s.resistors.rs_ohms = 100
-        s.resistors.r1_tol_pct = 2.0
-        s.resistors.r2_tol_pct = 0.5
-        s.resistors.r1_rating_mw = 250
-        s.resistors.r2_rating_mw = 125
-        s.r1_display_value = 4.7
-        s.r1_display_unit = "k\u03a9"
-        s.r2_display_value = 20.0
-        s.r2_display_unit = "k\u03a9"
-        s.rs_display_value = 100
-        s.rs_display_unit = "\u03a9"
-        s.zener.vz_nom = 5.1
-        s.zener.vz_min = 4.8
-        s.zener.vz_max = 5.4
-        s.mcu.vdd = 5.0
-        s.mcu.v_absolute_max = 6.0
-        s.system.v_input_max = 24
-        s.notes = "Test round-trip"
+        s.set_fields({
+            "r1.value": "4.7", "r1.unit": "k\u03a9", "r1.tol": "2.0", "r1.rating": "250",
+            "r2.value": "20.0", "r2.unit": "k\u03a9", "r2.tol": "0.5", "r2.rating": "125",
+            "rs.value": "100", "rs.unit": "\u03a9",
+            "zener.vz_nom": "5.1", "zener.vz_min": "4.8", "zener.vz_max": "5.4",
+            "mcu.vdd": "5.0", "mcu.v_absolute_max": "6.0",
+            "system.v_input_max": "24",
+            "notes": "Test round-trip",
+        })
 
         with tempfile.NamedTemporaryFile(suffix=".div", delete=False, mode="w") as f:
             path = f.name
@@ -116,12 +108,17 @@ class TestBackwardsCompatibility:
 
         try:
             s = AppState()
-            s.open_file(path)
+            warnings = s.open_file(path)
             assert s.resistors.r1_ohms == 10000
             assert s.resistors.r2_ohms == 18000
-            # Defaults should fill in
-            assert s.zener.vz_nom == 3.3
-            assert s.mcu.vdd == 3.3
+            # Rewritten for bug 5: this used to assert that hidden defaults
+            # (VZ 3.3 V, VDD 3.3 V) filled in. Missing fields now load blank
+            # and one warning lists them.
+            assert s.zener.vz_nom is None
+            assert s.mcu.vdd is None
+            assert s.fields["zener.vz_nom"] == ""
+            assert len(warnings) == 1
+            assert "VZ nom" in warnings[0] and "VDD/VDDA" in warnings[0]
         finally:
             os.unlink(path)
 

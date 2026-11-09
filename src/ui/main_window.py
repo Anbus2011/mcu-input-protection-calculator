@@ -13,7 +13,7 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageDraw, ImageTk
 
-from src.core.app_state import AppState
+from src.core.app_state import AppState, LoadError
 from src.models.circuit_model import CalculationResult
 from src.models.bandwidth_model import BandwidthResult
 from src.ui.input_panels import (
@@ -46,10 +46,13 @@ class MainWindow(ctk.CTk):
         self.app_state.set_title_callback(self._on_title_changed)
         self.app_state.set_results_callback(self._on_results_changed)
         self.app_state.set_bandwidth_callback(self._on_bandwidth_changed)
+        self.app_state.set_fields_callback(self._sync_fields_from_state)
+        self._refresh_pending = False
 
         # Build UI
         self._create_menu()
         self._create_layout()
+        self._refresh_outputs()
 
         # Close handler
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -155,13 +158,6 @@ class MainWindow(ctk.CTk):
         if not self._check_save():
             return
         self.app_state.file_new()
-        self.app_state.ignore_changes = True
-        self.resistor_panel.clear_fields()
-        self.zener_panel.clear_fields()
-        self.mcu_panel.clear_fields()
-        self.system_panel.clear_fields()
-        self.notes_panel.clear_fields()
-        self.app_state.ignore_changes = False
 
     def _file_open(self):
         if not self._check_save():
@@ -173,27 +169,45 @@ class MainWindow(ctk.CTk):
         if not filepath:
             return
         try:
-            data = self.app_state.open_file(filepath)
-            self.app_state.ignore_changes = True
-            self.resistor_panel.load_from_data(data)
-            self.zener_panel.load_from_data(data)
-            self.mcu_panel.load_from_data(data)
-            self.system_panel.load_from_data(data)
-            self.notes_panel.load_from_data(data)
-            self.app_state.ignore_changes = False
-            self._push_all_to_state()
-            self.app_state.recalculate()
+            warnings = self.app_state.open_file(filepath)
+        except LoadError as e:
+            messagebox.showerror("Can't Open File",
+                                 f"{filepath}\n\n{e}\n\nThe current design was not changed.")
+            return
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open file:\n{e}")
+            return
+        if warnings:
+            messagebox.showwarning("Loaded With Blank Fields", "\n\n".join(warnings))
+
+    def _save_blocked(self) -> bool:
+        """Unreadable text blocks saving: say which fields, and return True."""
+        bad = self.app_state.unreadable_fields()
+        if not bad:
+            return False
+        lines = "\n".join(f"  • {label}: '{text}'" for label, text in bad)
+        messagebox.showerror("Can't Save",
+                             "These fields contain text that isn't a valid value. "
+                             "Fix or clear them before saving:\n" + lines)
+        return True
+
+    def _save_to(self, filepath: str) -> bool:
+        ok = self.app_state.save_to_file(filepath)
+        if not ok:
+            messagebox.showerror("Save Failed",
+                                 self.app_state.last_save_error or "Failed to save file.")
+        return ok
 
     def _file_save(self) -> bool:
-        self._push_all_to_state()
+        if self._save_blocked():
+            return False
         if self.app_state.current_file:
-            return self.app_state.save_to_file(self.app_state.current_file)
+            return self._save_to(self.app_state.current_file)
         return self._file_save_as()
 
     def _file_save_as(self) -> bool:
-        self._push_all_to_state()
+        if self._save_blocked():
+            return False
         filepath = filedialog.asksaveasfilename(
             title="Save Divider Calculation",
             defaultextension=".div",
@@ -201,10 +215,7 @@ class MainWindow(ctk.CTk):
         )
         if not filepath:
             return False
-        ok = self.app_state.save_to_file(filepath)
-        if not ok:
-            messagebox.showerror("Error", "Failed to save file.")
-        return ok
+        return self._save_to(filepath)
 
     def _on_close(self):
         if self._check_save():
@@ -235,9 +246,17 @@ class MainWindow(ctk.CTk):
         self.notes_panel = NotesPanel(left, self.app_state)
         self.notes_panel.pack(fill="x", pady=5)
 
+        self.field_panels = [self.resistor_panel, self.zener_panel, self.mcu_panel,
+                             self.system_panel]
+
         # Right panel — outputs
         right = ctk.CTkFrame(main)
         right.pack(side="right", fill="both", expand=True)
+
+        # Input report: what's needed, what's wrong, solver warnings
+        self.banner = ctk.CTkLabel(right, text="", anchor="w", justify="left",
+                                   wraplength=880, text_color="orange")
+        self.banner.pack(fill="x", padx=10, pady=(5, 0))
 
         # Tabs
         self.tabs = ctk.CTkTabview(right, height=280)
@@ -260,6 +279,7 @@ class MainWindow(ctk.CTk):
         bw_left.pack(side="left", fill="y", padx=(0, 5))
         self.bw_input_panel = BandwidthInputPanel(bw_left, self.app_state)
         self.bw_input_panel.pack(fill="x")
+        self.field_panels.append(self.bw_input_panel)
 
         bw_right = ctk.CTkScrollableFrame(bw_container)
         bw_right.pack(side="right", fill="both", expand=True)
@@ -273,27 +293,51 @@ class MainWindow(ctk.CTk):
 
     # ── State → UI synchronisation ────────────────────────────────────────
 
-    def _push_all_to_state(self):
-        """Push current UI values into AppState (without triggering recalc)."""
-        self.resistor_panel.push_to_state()
-        self.zener_panel.push_to_state()
-        self.mcu_panel.push_to_state()
-        self.system_panel.push_to_state()
-        self.notes_panel.push_to_state()
-        self.bw_input_panel.push_to_state()
+    def _sync_fields_from_state(self):
+        """AppState changed field text itself (load, new, preset, fill)."""
+        for panel in self.field_panels:
+            panel.sync_from_state()
+        self.notes_panel.sync_from_state()
 
     def _on_title_changed(self, title: str):
         self.title(title)
 
     def _on_results_changed(self, result: CalculationResult):
-        self.components_tab.refresh(result)
-        self.safety_tab.refresh(result, self.app_state.mcu.safe_injection_ma)
-        self.operating_tab.refresh(result)
-        self.plot.refresh(result)
-        # Auto-update bandwidth tab with values from other panels
-        self.bw_input_panel.refresh_auto_values()
-        self.bw_input_panel.push_to_state()
-        self.app_state.recalculate_bandwidth()
+        self._schedule_refresh()
 
     def _on_bandwidth_changed(self, result: BandwidthResult):
-        self.bandwidth_tab.refresh(result)
+        self._schedule_refresh()
+
+    def _schedule_refresh(self):
+        """Coalesce bursts of edits into one redraw when Tk is idle."""
+        if not self._refresh_pending:
+            self._refresh_pending = True
+            self.after_idle(self._refresh_outputs)
+
+    def _refresh_outputs(self):
+        self._refresh_pending = False
+        s = self.app_state
+        r = s.result
+        self.components_tab.refresh(r)
+        self.safety_tab.refresh(r, s.mcu)
+        self.operating_tab.refresh(r)
+        self.bandwidth_tab.refresh(s.bw_result)
+        self.bw_input_panel.refresh_derived()
+        self.zener_panel.refresh_preset()
+
+        lines = s.report.lines()
+        self.banner.configure(text="\n".join(lines) if lines else "All inputs present.",
+                              text_color="orange" if lines else "gray60")
+
+        typ_keys = s.missing_keys("plot.typ")
+        worst_keys = s.missing_keys("plot.worst")
+        if typ_keys and worst_keys:
+            keys = typ_keys + [k for k in worst_keys if k not in typ_keys]
+            msg = "Plot needs input: " + s.describe_keys(keys)
+        elif typ_keys:
+            msg = "Typical curve needs input: " + s.describe_keys(typ_keys)
+        elif worst_keys:
+            msg = "Worst-case curve needs input: " + s.describe_keys(worst_keys)
+        else:
+            msg = ""
+        self.plot.refresh(r, msg)
