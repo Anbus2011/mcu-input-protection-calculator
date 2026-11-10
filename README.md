@@ -252,7 +252,7 @@ Margin indicators (worst-case margin column and the power verdict):
 
 #### Tab 2: MCU Input
 
-- **Voltage Limits** - at Max Input, V_mcuH against Safe Max and Absolute Max; at a negative Min Input, V_mcuL against Pin Min. Margin in mV and status. Safe Max is the guard against injection into the pin.
+- **Voltage Limits** - at Max Input, V_mcuH against Safe Max and Absolute Max; at a negative Min Input, V_mcuL against Pin Min. Margin in mV and status. Safe Max is the guard against current into the pin's protection structures.
 - **ADC Performance** - source impedance and resolution in mV/LSB (VREF / 2^N referred to the divider input)
 - **Analog Error** - at ADC Scale with nominal resistors: the pin voltage with the diode minus the pin voltage without it, in mV, percent and LSB. It has a status only when an allowed error is given.
 - **Information (no verdict)** - at the Touch voltage: highest pin voltage, clamp diode current and R1 power; and the current into the VDD rail at Max Input when the diode is connected to VDD

@@ -609,8 +609,8 @@ def solve(design) -> dict:
     v_high = d["v_pin_high"]
 
     # ── Check 1: highest input ───────────────────────────────────────────
-    # Safe Max is the guard against current into the pin's protection diodes
-    # (there is no injection-current estimate).
+    # Safe Max is the guard against current into the pin's protection
+    # structures.
     if need("margin_rec", "mcu.v_recommended_max", deps=("v_pin_high",)):
         d["margin_rec_v"] = v_rec_max - v_high
     check("pin_max_safe", "margin_rec",
