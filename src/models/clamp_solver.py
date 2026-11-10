@@ -43,9 +43,6 @@ SOLVER_TOLERANCE_V = 1e-9     # bisection stops when the bracket is 1 nV wide
 SOLVER_MAX_ITERATIONS = 200   # a guard only: 1 kV / 2^200 is far below 1 nV
 _LN_CURRENT_MAX = 690.0       # exp() guard for a steep segment extended far
 
-# Injection starts at VDD + 0.3 V; 100 ohm stands for the internal ESD path.
-INJECTION_ONSET_ABOVE_VDD_V = 0.3
-ESD_INTERNAL_OHMS = 100.0
 
 
 # ── Input rules (shared with the file loader and AppState) ───────────────────
@@ -76,7 +73,6 @@ NUMBER_RULES = {
     "mcu.v_recommended_max": _GT0,
     "mcu.v_absolute_max": _GT0,
     "mcu.v_pin_min": _LE0,
-    "mcu.safe_injection_ma": _GT0,
     "mcu.adc_bits": _BITS,
     "mcu.vil_factor": _FRACTION,
     "mcu.vih_factor": _FRACTION,
@@ -351,13 +347,6 @@ def _solve_node(vin: float, r1: float, r2: float, sign: float, v_ref: float,
     return 0.5 * (lo + hi), settled
 
 
-def injection_current_ma(v_pin: float, vdd: float, rs_ohms: float) -> float:
-    """Estimated injection current (mA): max(0, V - (VDD + 0.3)) / (R_s + 100).
-    Callers pass R_s at its low tolerance for the worst case."""
-    over = v_pin - (vdd + INJECTION_ONSET_ABOVE_VDD_V)
-    return max(0.0, over) / (rs_ohms + ESD_INTERNAL_OHMS) * 1000
-
-
 class Circuit:
     """A design with its inputs cleaned, ready for node solves."""
 
@@ -472,12 +461,6 @@ def _voltage_status(margin_v: float, pass_v: float) -> str:
     return TIGHT if margin_v >= 0 else FAIL
 
 
-def _injection_status(i_inj: float, limit: float) -> str:
-    if i_inj <= limit * 0.5:
-        return PASS
-    return TIGHT if i_inj <= limit else FAIL
-
-
 # ── Results ──────────────────────────────────────────────────────────────────
 
 LEVELS = (          # id, input path (None = 0 V), optional
@@ -499,7 +482,6 @@ DETAIL_KEYS = (
     "resolution_mv_per_lsb",
     # at the maximum input
     "v_pin_typ", "v_pin_diode_max", "v_pin_high", "margin_rec_v", "margin_abs_v",
-    "i_injection_ma",
     "i_r1_ma", "i_r2_ma", "i_diode_ma", "p_r1_mw", "p_r2_mw", "p_diode_mw", "p_total_mw",
     "has_rs", "i_rs_ma", "p_rs_mw",
     "p_r1_worst_mw", "p_r2_worst_mw", "p_diode_worst_mw", "p_rs_worst_mw",
@@ -627,6 +609,8 @@ def solve(design) -> dict:
     v_high = d["v_pin_high"]
 
     # ── Check 1: highest input ───────────────────────────────────────────
+    # Safe Max is the guard against current into the pin's protection diodes
+    # (there is no injection-current estimate).
     if need("margin_rec", "mcu.v_recommended_max", deps=("v_pin_high",)):
         d["margin_rec_v"] = v_rec_max - v_high
     check("pin_max_safe", "margin_rec",
@@ -646,16 +630,6 @@ def solve(design) -> dict:
         rs_min = rs_max = 0.0
     elif rs is not None and v[RST] is not None:
         rs_min, rs_max = rs * (1 - v[RST] / 100), rs * (1 + v[RST] / 100)
-
-    # Injection estimate: highest pin voltage, R_s at its low tolerance
-    if need("injection", VDD, *rs_names, deps=("v_pin_high",)):
-        d["i_injection_ma"] = injection_current_ma(v_high, vdd, rs_min)
-    inj_limit = v["mcu.safe_injection_ma"]
-    need("inj_status", "mcu.safe_injection_ma", deps=("injection",))
-    check("injection", "inj_status",
-          None if "inj_status" in missing
-          else _injection_status(d["i_injection_ma"], inj_limit),
-          d["i_injection_ma"], inj_limit, "mA")
 
     # ── Check 2: lowest input (only when it is negative) ─────────────────
     v_in_min = v["system.v_input_min"]
@@ -699,21 +673,17 @@ def solve(design) -> dict:
     for name in ("r1", "r2", "diode"):
         need(f"p_{name}_worst", deps=("power_worst",))
 
+    # Series resistor: the pin is taken as held at 0 V, so the whole node
+    # voltage is across R_s. Typical: typical node voltage, nominal R_s.
+    # Worst case: highest node voltage, R_s at its low tolerance.
     if has_rs:
-        if need("p_rs", RS, VDD, deps=("typ_at_max",)):
-            d["i_rs_ma"] = injection_current_ma(d["v_pin_typ"], vdd, rs)
-            d["p_rs_mw"] = (d["i_rs_ma"] / 1000) ** 2 * rs * 1000
-        if need("p_rs_worst", RS, RST, VDD, deps=("v_pin_high",)):
-            # P(R) = I(R)^2 R with I = dV / (R + 100) peaks at R = 100 ohm, so
-            # the maximum over [R_s min, R_s max] is at an end or at 100 ohm.
-            candidates = [rs_min, rs_max]
-            if rs_min < ESD_INTERNAL_OHMS < rs_max:
-                candidates.append(ESD_INTERNAL_OHMS)
-            best_r = max(candidates,
-                         key=lambda r: injection_current_ma(v_high, vdd, r) ** 2 * r)
-            i_ma = injection_current_ma(v_high, vdd, best_r)
-            d["p_rs_worst_mw"] = (i_ma / 1000) ** 2 * best_r * 1000
-            d["worst_power_corner"]["rs"] = f"highest pin {v_high:.3f} V, R_s {best_r:g} Ω"
+        if need("p_rs", RS, deps=("typ_at_max",)):
+            d["i_rs_ma"] = d["v_pin_typ"] / rs * 1000
+            d["p_rs_mw"] = d["v_pin_typ"] ** 2 / rs * 1000
+        if need("p_rs_worst", RS, RST, deps=("v_pin_high",)):
+            d["p_rs_worst_mw"] = v_high ** 2 / rs_min * 1000
+            d["worst_power_corner"]["rs"] = (
+                f"highest node voltage {v_high:.3f} V, R_s min {rs_min:g} Ω, pin at 0 V")
 
     # Margins: (rating - power) / rating. The worst-case margin is the
     # verdict for each part; the typical margin is information.
@@ -741,12 +711,11 @@ def solve(design) -> dict:
     v_fs = v["system.v_analog_fullscale"]
     if v_fs is not None:
         fs_high = levels["analog_fullscale"]["high"]
-        # Range: the highest pin voltage at full scale against VDD
-        need("analog_range", VDD, "mcu.v_recommended_max",
-             deps=("analog_fullscale.worst",))
+        # Range: the highest pin voltage at full scale must not be above VDD
+        need("analog_range", VDD, deps=("analog_fullscale.worst",))
         status = None
         if "analog_range" not in missing:
-            status = PASS if fs_high <= vdd else TIGHT if fs_high <= v_rec_max else FAIL
+            status = PASS if fs_high <= vdd else FAIL
         check("analog_range", "analog_range", status, fs_high, vdd, "V")
 
         # Error: pin voltage with the diode minus without it, nominal

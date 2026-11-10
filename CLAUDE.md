@@ -76,9 +76,11 @@ The protection network forms an RC low-pass filter.
 * **Effective Max PPS:** The minimum of the four limits above (analog conservative, analog practical, digital, firmware), with the bottleneck named. Shown only when all four are known.
 
 ### D. STM32 Specific Constants
-* **Safe Max Limit:** VDDA + 0.3V (Threshold before internal ESD injection begins).
-* **Injection Current Estimate:** Injection starts at VDD + 0.3 V; calculate the estimated injection current in mA from the worst-case pin voltage V_mcuH. R_s,min is R_s at its low tolerance (0 when there is no R_s); the 100Ω represents internal ESD resistance (see §4B):
-  $$I_{inj} = \frac{\max(0,\ V_{mcuH} - (VDD + 0.3))}{R_{s,min} + 100}$$
+* **Safe Max Limit:** VDDA + 0.3V (Threshold before internal ESD injection begins). The `pin_max_safe` check (highest pin voltage at the maximum input against Safe Max) is the guard against injection.
+* **No injection current estimate** (removed 2026-11-09, approved by the owner). The old formula divided by 100 Ω for the internal ESD path; that number came from the first version of the app and no data sheet gives it. There is no injection check, no Injection Limit field and no `safe_injection_ma` key. *Until step 3 of the div-v2 work switches the app to `clamp_solver.py`, the app and §4B still show the old estimate.*
+* **R_s power** (the pin is taken as held at 0 V, so the whole node voltage is across R_s; no 100 Ω anywhere):
+  * Typical: $P_{Rs} = V_{typ}^2 / R_s$ (typical node voltage at the maximum input, nominal R_s).
+  * Worst case (the `power_rs` check): $P_{Rs} = V_{node,max}^2 / R_{s,min}$, with $V_{node,max}$ the highest node voltage at the maximum input and $R_{s,min}$ R_s at its low tolerance.
 * **ADC Source Impedance:** $$R_{source} = \frac{R1 \times R2}{R1 + R2} + R_{series}$$
 * **STM32G4 ADC Sampling Cycles:**
   * <= 1 kΩ -> 2.5 cycles

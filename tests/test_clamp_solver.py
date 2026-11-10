@@ -54,19 +54,19 @@ def table_voltage(rows, column, amps):
 
 class TestReferenceNumbers:
     @pytest.mark.parametrize("design,typ,low,high", [
-        (zener_reference(), 3.020, 2.820, 3.219),
-        (results_design(3.0), 1.928, 1.789, 2.054),
-        (results_design(4.1), 2.156, 1.990, 2.318),
-        (results_design(30), 3.106, 2.906, 3.307),
+        (zener_reference(), 3.020, 2.840, 3.239),
+        (results_design(3.0), 1.928, 1.803, 2.065),
+        (results_design(4.1), 2.156, 2.007, 2.334),
+        (results_design(30), 3.106, 2.926, 3.326),
     ])
     def test_table(self, design, typ, low, high):
-        """The table of docs/session2_prompt.md, within 0.01 V. It was worked
-        out with typical -/+ 0.2 V in every row; the 5 mA row is now Table 8
-        (3.10 / 3.50 V), which moves the two 30 V rows by 5 to 10 mV."""
+        """The reference table of docs/session2_prompt.md, reset on 2026-11-09
+        for minimum = typical - 0.18 V and maximum = typical + 0.22 V (it was
+        typical -/+ 0.2 V: lowest and highest were 14 to 20 mV lower)."""
         row = solve(design)["voltages"]["levels"]["max_input"]
-        assert row["typ"] == pytest.approx(typ, abs=0.01)
-        assert row["low"] == pytest.approx(low, abs=0.01)
-        assert row["high"] == pytest.approx(high, abs=0.01)
+        assert row["typ"] == pytest.approx(typ, abs=0.001)
+        assert row["low"] == pytest.approx(low, abs=0.001)
+        assert row["high"] == pytest.approx(high, abs=0.001)
 
     def test_values_as_measured(self):
         """The same rows to 1 mV, as this solver gives them."""
@@ -74,18 +74,20 @@ class TestReferenceNumbers:
                (zener_reference(), results_design(3.0), results_design(4.1),
                 results_design(30))]
         assert [(f"{r['typ']:.3f}", f"{r['low']:.3f}", f"{r['high']:.3f}") for r in got] == [
-            ("3.020", "2.825", "3.224"), ("1.928", "1.789", "2.054"),
-            ("2.156", "1.990", "2.318"), ("3.106", "2.916", "3.316")]
+            ("3.020", "2.840", "3.239"), ("1.928", "1.803", "2.065"),
+            ("2.156", "2.007", "2.334"), ("3.106", "2.926", "3.326")]
 
-    def test_only_the_5_ma_row_moved_the_table(self):
-        """With typical -/+ 0.2 V in every row the solver gives the table of
-        docs/session2_prompt.md to the millivolt."""
+    def test_original_table_with_the_original_offsets(self):
+        """With typical -/+ 0.2 V in every row the solver gives the table as
+        docs/session2_prompt.md first had it, to the millivolt."""
         rows = [dict(r, v_min=round(r["v_typ"] - 0.2, 3), v_max=round(r["v_typ"] + 0.2, 3))
                 for r in zener_reference()["clamp_diode"]["reverse"]]
         got = [solve(change(d, clamp_diode__reverse=rows))["voltages"]["levels"]["max_input"]
-               for d in (zener_reference(), results_design(30))]
+               for d in (zener_reference(), results_design(3.0), results_design(4.1),
+                         results_design(30))]
         assert [(f"{r['typ']:.3f}", f"{r['low']:.3f}", f"{r['high']:.3f}") for r in got] == [
-            ("3.020", "2.820", "3.219"), ("3.106", "2.906", "3.307")]
+            ("3.020", "2.820", "3.219"), ("1.928", "1.789", "2.054"),
+            ("2.156", "1.990", "2.318"), ("3.106", "2.906", "3.307")]
 
     def test_first_row_by_hand(self):
         """At 3.02 V the diode current is (30 - 3.02)/10k - 3.02/18k = 2.53 mA,
@@ -105,9 +107,8 @@ class TestReferenceNumbers:
         assert d["r_total_ohms"] == pytest.approx(28000)
         assert round(d["k_nominal"], 3) == 0.643
         assert f"{d['v_pin_typ']:.2f}" == "3.02"
-        assert f"{d['v_pin_high']:.2f}" == "3.22"
+        assert f"{d['v_pin_high']:.2f}" == "3.24"
         assert f"{d['i_diode_ma']:.2f}" == "2.53"
-        assert d["i_injection_ma"] == 0.0          # 3.219 V is below VDD + 0.3 V
 
     def test_lowest_and_highest_corners(self):
         """For the Zener to GND: lowest is R1 +1 %, R2 -1 %, minimum column;
@@ -134,13 +135,15 @@ class TestReferenceNumbers:
         rows = zener_reference()["clamp_diode"]["reverse"]
         assert [r["v_typ"] for r in rows] == C3V3_TYPICAL_V
         for r in rows:
-            if r["i_ma"] == 5:      # Table 8: VZ 3.1 to 3.5 V at IZ = 5 mA
-                assert (r["v_min"], r["v_typ"], r["v_max"]) == (3.10, 3.28, 3.50)
-            else:
-                assert r["v_min"] == pytest.approx(r["v_typ"] - 0.2)
-                assert r["v_max"] == pytest.approx(r["v_typ"] + 0.2)
+            assert r["v_min"] == pytest.approx(r["v_typ"] - 0.18)
+            assert r["v_max"] == pytest.approx(r["v_typ"] + 0.22)
+        # Table 8: VZ 3.10 to 3.50 V at IZ = 5 mA
+        assert [(r["v_min"], r["v_typ"], r["v_max"]) for r in rows if r["i_ma"] == 5] == [
+            (3.10, 3.28, 3.50)]
         note = zener_reference()["clamp_diode"]["note"]
-        assert "5 mA row" in note and "Table 8" in note and "Every other row" in note
+        for text in ("v_typ - 0.18 V", "v_typ + 0.22 V", "in every row", "Table 8",
+                     "3.10 V min and 3.50 V max"):
+            assert text in note
 
 
 class TestSchottkyToRail:
@@ -471,10 +474,10 @@ class TestNeedsInput:
     def test_blank_vdd_blocks_only_what_uses_it(self):
         r = solve(zener_reference(mcu__vdd=None))
         d = r["details"]
-        assert d["resolution_mv_per_lsb"] is None and d["i_injection_ma"] is None
+        assert d["resolution_mv_per_lsb"] is None and d["analog_error_lsb"] is None
         assert d["v_pin_typ"] is not None and d["margin_abs_v"] is not None
         assert check(r, "pin_max_abs")["status"] == PASS
-        assert check(r, "injection")["status"] == NEEDS_INPUT
+        assert check(r, "analog_range")["status"] == NEEDS_INPUT
         assert check(r, "logic_high")["status"] == NEEDS_INPUT
         assert r["needs_input"] == ["mcu.vdd"]
 
@@ -600,7 +603,8 @@ class TestSeriesResistor:
         r = solve(zener_reference(resistors__r_series__value=100))
         assert r["needs_input"] == ["resistors.r_series.rating_mw",
                                     "resistors.r_series.tolerance_pct"]
-        assert r["details"]["i_injection_ma"] is None
+        assert r["details"]["p_rs_worst_mw"] is None
+        assert r["details"]["p_rs_mw"] is not None       # typical needs no tolerance
         assert check(r, "power_rs")["status"] == NEEDS_INPUT
         assert r["details"]["r_source_ohms"] == pytest.approx(10000 * 18000 / 28000 + 100)
 
@@ -641,34 +645,24 @@ class TestHighestInput:
         assert statuses(0.04, 0.09) == (TIGHT, TIGHT)
         assert statuses(-0.01, -0.01) == (FAIL, FAIL)
 
-    def test_reference_injection_is_zero(self):
-        r = solve(zener_reference())
-        assert check(r, "injection") == {"id": "injection", "status": PASS, "value": 0.0,
-                                         "limit": 1.0, "unit": "mA"}
+    def test_no_injection_estimate(self):
+        """Removed (owner, 2026-11-09): the estimate divided by an assumed
+        100 Ω that no data sheet gives. There is no injection check, no
+        injection result and no injection-limit input."""
+        r = solve(hot())
+        assert "injection" not in [c["id"] for c in r["checks"]]
+        assert not [k for k in r["details"] if "inj" in k]
+        assert not [p for p in clamp_solver.NUMBER_RULES if "injection" in p]
+        assert not hasattr(clamp_solver, "injection_current_ma")
+        assert not hasattr(clamp_solver, "ESD_INTERNAL_OHMS")
 
-    def test_injection_formula_no_series_resistor(self):
-        d = solve(hot())["details"]
-        assert d["v_pin_high"] > 3.7
-        assert d["i_injection_ma"] == pytest.approx((d["v_pin_high"] - 3.6) / 100 * 1000)
-
-    def test_injection_uses_rs_at_its_low_tolerance(self):
-        r = solve(hot(resistors__r_series=dict(value=1, unit=KOHM, rating_mw=250,
-                                               tolerance_pct=5)))
-        d = r["details"]
-        assert d["i_injection_ma"] == pytest.approx((d["v_pin_high"] - 3.6) / 1050 * 1000)
-
-    def test_injection_thresholds_kept(self):
-        """PASS up to half the limit, TIGHT up to the limit, FAIL above."""
-        i = solve(hot())["details"]["i_injection_ma"]
-        for limit, status in ((2.1 * i, PASS), (1.5 * i, TIGHT), (0.9 * i, FAIL)):
-            r = solve(hot(mcu__safe_injection_ma=limit))
-            assert check(r, "injection")["status"] == status
-
-    def test_series_resistor_needs_its_tolerance(self):
-        r = solve(hot(resistors__r_series=dict(value=1, unit=KOHM, rating_mw=250,
-                                               tolerance_pct=None)))
-        assert r["details"]["i_injection_ma"] is None
-        assert "resistors.r_series.tolerance_pct" in r["missing"]["injection"]
+    def test_safe_max_is_the_guard(self):
+        """A pin above Safe Max (VDD + 0.3 V here) fails pin_max_safe."""
+        r = solve(hot())
+        assert r["details"]["v_pin_high"] > 3.7 > 3.6
+        assert check(r, "pin_max_safe")["status"] == FAIL
+        assert r["verdict"] == FAIL
+        assert check(solve(zener_reference()), "pin_max_safe")["status"] == PASS
 
 
 # ── Check 2: lowest input ────────────────────────────────────────────────────
@@ -763,27 +757,35 @@ class TestPower:
         reverse = zener_reference()["clamp_diode"]["reverse"]
         assert v == pytest.approx(table_voltage(reverse, "v_min", amps), abs=2e-6)
         assert d["p_r1_worst_mw"] == pytest.approx((30 - v) ** 2 / 9.9)
-        assert d["p_r1_worst_mw"] == pytest.approx(74.55, abs=0.01)
+        assert d["p_r1_worst_mw"] == pytest.approx(74.47, abs=0.01)
         assert d["worst_power_corner"]["r1"] == "R1 min, R2 min, diode min"
 
     def test_series_resistor_power(self):
-        rs = dict(value=1, unit=KOHM, rating_mw=10, tolerance_pct=5)
+        """Pin held at 0 V: the whole node voltage is across R_s. Typical:
+        V_typ^2 / R_s. Worst case: V_node,max^2 / R_s,min."""
+        rs = dict(value=1, unit=KOHM, rating_mw=20, tolerance_pct=5)
         d = solve(hot(resistors__r_series=rs))["details"]
-        i_typ = max(0.0, d["v_pin_typ"] - 3.6) / 1100
-        assert d["p_rs_mw"] == pytest.approx(i_typ ** 2 * 1000 * 1000)
-        i_worst = (d["v_pin_high"] - 3.6) / 1050          # maximum is at 950 Ω
-        assert d["p_rs_worst_mw"] == pytest.approx(i_worst ** 2 * 950 * 1000)
+        assert d["i_rs_ma"] == pytest.approx(d["v_pin_typ"] / 1000 * 1000)
+        assert d["p_rs_mw"] == pytest.approx(d["v_pin_typ"] ** 2 / 1000 * 1000)
+        assert d["p_rs_worst_mw"] == pytest.approx(d["v_pin_high"] ** 2 / 950 * 1000)
         assert d["p_rs_worst_mw"] >= d["p_rs_mw"]
-        assert d["rs_margin_worst_pct"] == pytest.approx((10 - d["p_rs_worst_mw"]) / 10 * 100)
-        assert d["rs_margin_pct"] == pytest.approx((10 - d["p_rs_mw"]) / 10 * 100)
+        assert d["rs_margin_worst_pct"] == pytest.approx((20 - d["p_rs_worst_mw"]) / 20 * 100)
+        assert d["rs_margin_pct"] == pytest.approx((20 - d["p_rs_mw"]) / 20 * 100)
+        assert "R_s min 950 Ω, pin at 0 V" in d["worst_power_corner"]["rs"]
 
-    def test_rs_worst_peak_inside_tolerance_band(self):
-        """P(R) peaks at R = 100 Ω; with R_s 100 Ω at 10 % the maximum is at
-        100 Ω, not at either end."""
+    def test_series_resistor_power_on_the_baseline(self):
+        """Baseline with R_s 100 Ω at 10 %: 3.239 V^2 / 90 Ω = 116.6 mW. No
+        100 Ω term and no VDD in the formula."""
         rs = dict(value=100, unit=OHM, rating_mw=250, tolerance_pct=10)
-        d = solve(hot(resistors__r_series=rs))["details"]
-        dv = d["v_pin_high"] - 3.6
-        assert d["p_rs_worst_mw"] == pytest.approx((dv / 200) ** 2 * 100 * 1000)
+        r = solve(zener_reference(resistors__r_series=rs))
+        d = r["details"]
+        assert d["p_rs_worst_mw"] == pytest.approx(d["v_pin_high"] ** 2 / 90 * 1000)
+        assert d["p_rs_worst_mw"] == pytest.approx(116.6, abs=0.1)
+        assert check(r, "power_rs") == {"id": "power_rs", "status": PASS,
+                                        "value": d["p_rs_worst_mw"], "limit": 250,
+                                        "unit": "mW"}
+        no_vdd = solve(zener_reference(resistors__r_series=rs, mcu__vdd=None))
+        assert no_vdd["details"]["p_rs_worst_mw"] == d["p_rs_worst_mw"]
 
     def test_margins_and_thresholds_kept(self):
         """PASS above 20 %, TIGHT from 0 to 20 %, FAIL at or below 0 %; the
@@ -862,18 +864,26 @@ class TestAnalog:
         r = solve(zener_reference(system__analog_error_allowed_pct=1.0))
         assert check(r, "analog_error")["status"] == FAIL
 
-    def test_range_against_vdd_and_safe_max(self):
-        """Kept from the Input Levels table: PASS up to VDD, TIGHT up to Safe
-        Max, FAIL above."""
+    def test_range_against_vdd(self):
+        """PASS up to VDD, FAIL above it (owner, 2026-11-09: no TIGHT band up
+        to Safe Max)."""
         r = solve(zener_reference())
         row = r["voltages"]["levels"]["analog_fullscale"]
         assert check(r, "analog_range") == {"id": "analog_range", "status": PASS,
                                             "value": row["high"], "limit": 3.3, "unit": "V"}
-        r = solve(schottky_rail(system__v_analog_fullscale=5.3))
-        assert 3.3 < r["voltages"]["levels"]["analog_fullscale"]["high"] <= 3.6
-        assert check(r, "analog_range")["status"] == TIGHT
-        r = solve(hot(system__v_analog_fullscale=20))
+        r = solve(schottky_rail())               # 5.1 V: R1 -1 %, R2 +1 % gives 3.3013 V
+        assert 3.3 < r["voltages"]["levels"]["analog_fullscale"]["high"] < 3.302
         assert check(r, "analog_range")["status"] == FAIL
+        r = solve(schottky_rail(system__v_analog_fullscale=5.0))
+        assert r["voltages"]["levels"]["analog_fullscale"]["high"] <= 3.3
+        assert check(r, "analog_range")["status"] == PASS
+
+    def test_range_does_not_use_safe_max(self):
+        r = solve(schottky_rail(mcu__v_recommended_max=None))
+        assert check(r, "analog_range")["status"] == FAIL
+        for safe_max in (3.31, 5.0):
+            r = solve(schottky_rail(mcu__v_recommended_max=safe_max))
+            assert check(r, "analog_range")["status"] == FAIL
 
 
 # ── Check 6: frequency ───────────────────────────────────────────────────────
@@ -1034,10 +1044,10 @@ class TestInfoAndVerdict:
         assert z["verdict"] == FAIL
         assert [c["id"] for c in z["checks"] if c["status"] == FAIL] == ["logic_high"]
         s = solve(schottky_rail())
-        assert [c["id"] for c in s["checks"] if c["status"] == FAIL] == ["pin_max_safe"]
+        assert [c["id"] for c in s["checks"] if c["status"] == FAIL] == [
+            "pin_max_safe", "analog_range"]
         passing = solve(schottky_rail(mcu__v_recommended_max=3.71, mcu__v_absolute_max=4.0,
-                                      system__v_analog_fullscale=None,
-                                      mcu__safe_injection_ma=5))
+                                      system__v_analog_fullscale=None))
         assert passing["verdict"] == PASS
 
     def test_check_ids(self):
@@ -1045,7 +1055,7 @@ class TestInfoAndVerdict:
                                resistors__r_series=dict(value=100, unit=OHM, rating_mw=100,
                                                         tolerance_pct=1)))
         assert [c["id"] for c in r["checks"]] == [
-            "pin_max_safe", "pin_max_abs", "injection", "pin_min", "logic_high",
+            "pin_max_safe", "pin_max_abs", "pin_min", "logic_high",
             "logic_low", "power_r1", "power_r2", "power_diode", "power_rs",
             "analog_range", "analog_error", "frequency"]
         for c in r["checks"]:

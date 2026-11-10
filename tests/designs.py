@@ -27,20 +27,17 @@ def table(currents_ma, v_min, v_typ, v_max):
             for i, lo, typ, hi in zip(currents_ma, v_min, v_typ, v_max)]
 
 
-# Table 8: VZ at IZ = 5 mA is 3.1 V minimum and 3.5 V maximum.
-C3V3_TABLE8_MA, C3V3_TABLE8_MIN_V, C3V3_TABLE8_MAX_V = 5, 3.10, 3.50
+# Table 8: VZ at IZ = 5 mA is 3.10 V minimum and 3.50 V maximum. Fig. 7 reads
+# 3.28 V there, so the limits are 0.18 V below and 0.22 V above the typical.
+C3V3_MIN_OFFSET_V, C3V3_MAX_OFFSET_V = -0.18, 0.22
 
 
 def c3v3_reverse():
-    """Typical column from Fig. 7. The 5 mA row takes its minimum and maximum
-    from Table 8 (3.10 V and 3.50 V). Every other row is typical - 0.20 V and
-    typical + 0.20 V: half the width of the Table 8 band."""
-    rows = table(C3V3_CURRENT_MA, [x - 0.2 for x in C3V3_TYPICAL_V], C3V3_TYPICAL_V,
-                 [x + 0.2 for x in C3V3_TYPICAL_V])
-    for row in rows:
-        if row["i_ma"] == C3V3_TABLE8_MA:
-            row["v_min"], row["v_max"] = C3V3_TABLE8_MIN_V, C3V3_TABLE8_MAX_V
-    return rows
+    """Typical column from Fig. 7. Minimum = typical - 0.18 V and maximum =
+    typical + 0.22 V in every row: the offsets of the Table 8 limits (3.10 V
+    and 3.50 V) from the Fig. 7 typical (3.28 V) at 5 mA."""
+    return table(C3V3_CURRENT_MA, [x + C3V3_MIN_OFFSET_V for x in C3V3_TYPICAL_V],
+                 C3V3_TYPICAL_V, [x + C3V3_MAX_OFFSET_V for x in C3V3_TYPICAL_V])
 
 
 def bat54_forward():
@@ -61,13 +58,14 @@ def bat54_reverse():
 
 ZENER_NOTE = (
     "reverse: v_typ is Fig. 7 (typical working voltage against current, Tj = 25 C), "
-    "read from the graph to about +/-0.02 V. 5 mA row: v_min 3.10 V and v_max "
-    "3.50 V are Table 8 (VZ at IZ = 5 mA), so that row is v_typ - 0.18 V and "
-    "v_typ + 0.22 V. Every other row: v_min = v_typ - 0.20 V and v_max = v_typ + "
-    "0.20 V, half the width of the Table 8 band; the data sheet gives no limits "
-    "away from 5 mA. 25 C only, no temperature spread. "
+    "read from the graph to about +/-0.02 V. v_min = v_typ - 0.18 V and v_max = "
+    "v_typ + 0.22 V in every row. Those are the offsets at 5 mA, the one current "
+    "where the data sheet gives limits: Table 8 has VZ 3.10 V min and 3.50 V max "
+    "at IZ = 5 mA, and Fig. 7 reads 3.28 V there. The data sheet gives no limits "
+    "at other currents, so the same two offsets are used for all rows. 25 C "
+    "only, no temperature spread. "
     "Table 8 IR max (5 uA at VR = 1 V) is leakier than v_min here (about "
-    "1.5 uA at 1 V) and is not folded in. forward: empty, not modelled (Table 7 "
+    "1.3 uA at 1 V) and is not folded in. forward: empty, not modelled (Table 7 "
     "gives one point, VF max 0.9 V at 10 mA). capacitance: Cd max at VR = 0 V, "
     "1 MHz (Table 8). ptot: one diode loaded, Tamb <= 25 C (Table 5).")
 
@@ -86,9 +84,7 @@ SCHOTTKY_NOTE = (
 
 MCU_NOTE = (
     "TT_xx pin. Safe Max = VDD + 0.3 V (Table 17, VIN). Abs. Max 4.0 V and pin "
-    "minimum VSS - 0.3 V (Table 14). Injection limit: 1 mA is the project's "
-    "working value, not a data-sheet one (Table 15 gives -5 / 0 mA: positive "
-    "injection is not possible on TT and FT pins). VIL 0.3 x VDD, VIH 0.7 x VDD "
+    "minimum VSS - 0.3 V (Table 14). VIL 0.3 x VDD, VIH 0.7 x VDD "
     "and CIO 5 pF typ (Table 54). Minimum pulse width: 3 x tTIMxCLK at 170 MHz "
     "(Table 84, tW(TI1,TI2), directional clock x1). ADC: 12 bit.")
 
@@ -109,7 +105,6 @@ def _mcu():
         "v_recommended_max": 3.6,
         "v_absolute_max": 4.0,
         "v_pin_min": -0.3,
-        "safe_injection_ma": 1.0,
         "adc_bits": 12,
         "vil_factor": 0.3,
         "vih_factor": 0.7,

@@ -77,15 +77,16 @@ class TestExamples:
         assert (s["type"], s["anode"], s["cathode"]) == ("schottky", "node", "vdd")
 
     def test_format_doc_quotes_the_stored_analog_range_value(self):
-        """docs/div_v2_format.md explains why this check is TIGHT, not FAIL."""
+        """docs/div_v2_format.md explains this 1.3 mV FAIL."""
         data = read_json(example_path("schottky_rail_bat54cv.div"))
         check = next(c for c in data["results"]["checks"] if c["id"] == "analog_range")
-        assert check == {"id": "analog_range", "status": "TIGHT", "value": 3.301258,
+        assert check == {"id": "analog_range", "status": "FAIL", "value": 3.301258,
                          "limit": 3.3, "unit": "V"}
-        assert 3.3 < 5.1 * 18.18 / 28.08 < data["mcu"]["v_recommended_max"]
+        assert 3.3 < 5.1 * 18.18 / 28.08 < 3.302
         with open(os.path.join(ROOT, "docs", "div_v2_format.md"), encoding="utf-8") as f:
             doc = f.read()
         assert "`value` 3.301258 V against `limit` 3.3 V" in doc
+        assert "injection" not in doc.replace("injection into", "")
 
     def test_results_div_is_gone_or_rejected(self):
         """No v1 converter: a v1 file gets one clear message."""
@@ -115,11 +116,22 @@ class TestStructure:
         s = div_format.SCHEMA
         assert set(s["resistors"]) == {"r1", "r2", "r_series"}
         assert set(s["resistors"]["r1"]) == {"value", "unit", "rating_mw", "tolerance_pct"}
-        assert {"vdd", "v_recommended_max", "v_absolute_max", "safe_injection_ma",
+        assert {"vdd", "v_recommended_max", "v_absolute_max",
                 "adc_bits", "vil_factor", "vih_factor"} <= set(s["mcu"])
         assert {"v_input_max", "v_analog_fullscale", "v_logic_high_min",
                 "v_logic_low_max"} <= set(s["system"])
         assert "ptot_mw" in s["clamp_diode"] and "c_stray_pf" in s["bandwidth"]
+
+    def test_injection_limit_key_is_gone(self):
+        """Removed with the injection estimate (owner, 2026-11-09)."""
+        assert "safe_injection_ma" not in div_format.SCHEMA["mcu"]
+        d = zener_reference()
+        d["mcu"]["safe_injection_ma"] = 1.0
+        problems = validate(d)
+        assert paths(problems) == ["mcu.safe_injection_ma"]
+        assert problems[0].message == "unknown key"
+        for name in EXAMPLES:
+            assert "injection" not in open(example_path(name), encoding="utf-8").read()
 
     def test_blank_design_is_valid(self):
         assert validate(blank_design()) == []
@@ -342,7 +354,7 @@ class TestReadWrite:
         assert text.isascii() and text.endswith("}\n")
         assert '"unit": "k\\u03a9"' in text
         # a table row, a resistor and an empty table each take one line
-        assert '      {"i_ma": 1, "v_min": 2.49, "v_typ": 2.69, "v_max": 2.89},\n' in text
+        assert '      {"i_ma": 1, "v_min": 2.51, "v_typ": 2.69, "v_max": 2.91},\n' in text
         assert '    "r1": {"value": 10, "unit": "k\\u03a9", "rating_mw": 200, ' \
                '"tolerance_pct": 1},\n' in text
         assert '    "forward": [],\n' in text

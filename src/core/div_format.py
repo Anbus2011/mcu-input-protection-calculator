@@ -53,7 +53,7 @@ SCHEMA = {
         "part": TEXT, "source": TEXT, "checked": FLAG, "note": TEXT,
         "pin_type": TEXT,
         "vdd": NUMBER, "v_recommended_max": NUMBER, "v_absolute_max": NUMBER,
-        "v_pin_min": NUMBER, "safe_injection_ma": NUMBER, "adc_bits": NUMBER,
+        "v_pin_min": NUMBER, "adc_bits": NUMBER,
         "vil_factor": NUMBER, "vih_factor": NUMBER,
         "c_pin_pf": NUMBER, "t_pulse_min_ns": NUMBER,
     },
