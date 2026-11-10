@@ -19,7 +19,7 @@ If these tools are not available, stop and say so.
 
 ## Versions
 
-- Skill version: 1.0.1
+- Skill version: 1.0.2
 - Written and tested for SOLVER_VERSION: 2.0.0
 
 ## Start of every session
@@ -40,7 +40,8 @@ Do both steps before any design work.
    - the required frequency (`f_required_hz`);
    - analog full scale and allowed error (`v_analog_fullscale`, `analog_error_allowed_pct`);
    - the temperature range;
-   - the MCU pin type (`pin_type`).
+   - the MCU pin type (`pin_type`);
+   - the folder that holds the board's data sheets (see Rules).
 
    Give each input a role. A file holds one pair of logic levels: with several sources, the lowest high and the highest low. Inputs with different roles (analog and digital, say) get one .div each. When one node feeds several MCU pins, the weakest pin's limits go in the file.
 2. **MCU.** Read the MCU data sheet and fill in the `mcu` section.
@@ -54,7 +55,11 @@ Do both steps before any design work.
 
 - **Every value in `results` comes from `solve_div`** and is shown as returned, never retyped: tables as `solve_div` returned them (`summary`), plots as `plot_div` drew them.
 - **Nothing is guessed.** A value with no source is written as `null` and shows as "needs input". The example files show the layout of a .div; never take a value from them.
+- **Data sheets come from the user.** Before reading any MCU or diode value, ask the user which folder holds the board's data sheets (once per board, saved with the requirements). Read a data sheet only from the user's copy in that folder or from a file attached to the chat. If the data sheet needed isn't there, stop: give the user a download link to the manufacturer's data sheet (document number and revision) and ask them to save it in that folder. Never read a data sheet through the web.
 - **Every data-sheet value is cited** in the `source` and `note` of its section (document number, revision, table or figure), and the section is written with `checked: false`. Only the user ticks it, in the app.
+- **Values from other documents.** If a value is available from a project document instead of the data sheet (curve readings or MCU limits recorded earlier, say), don't use it on your own: ask the user. If they agree, cite it in `source` and `note` as second-hand: the document, and the data sheet it came from.
+- **No estimates.** A number the skill wants (the R1 needed for a check to pass, say) comes from solving trial values through `solve_div`, never from a hand or rough estimate.
+- **What-ifs.** A trial with placeholder values is labeled as a what-if in the report, names every placeholder, and is never written into the .div that is handed over.
 - **A check the solver doesn't make** (resistor derating at temperature, the board's minimum rail load) is reported as done by the skill or as not checked. Never as PASS. A check the skill makes shows its arithmetic in the report: which `solve_div` value, which rating or limit, the result.
 - **Versions.** The skill version, the `solver_version` and the server's `commit` go in the `notes` of every .div and in the report.
 - **The file.** Every key of the format is present, `null` for a blank; an unknown key is an error; `results` is written only by the solver. A diode table with no rows is `null` while it is still to be filled in, and `[]` only when that direction is left out on purpose, which the `note` then says.
@@ -86,6 +91,9 @@ One report per .div, in this order. Where a section has nothing, write "none".
     Checks the solver doesn't make
       <check>: done by the skill: <the solve_div value, the rating or limit, the arithmetic, the result in words>
       <check>: not checked
+
+    What-ifs
+      WHAT-IF: <the trial>; placeholders: <every placeholder value and what it stands in for>; <the result, as solve_div returned it>
 
     Needs input
       <key>: <why it has no source>

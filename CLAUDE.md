@@ -7,7 +7,7 @@ A design lives in a `.div` file (format 2.0, `docs/div_v2_format.md`). A Claude 
 
 When writing or modifying code for this project, you must adhere strictly to the architectural rules and mathematical models defined in this document. What the screen shows (labels, messages, colours, layout) is described in `README.md`.
 
-**Repository files.** `docs/project_guide.md` says what the app does, what the planned skill will do, and the workflow from requirements to an approved design. `docs/bzb984_fig7_typical.json` and `docs/bat54cv_fig1_fig2_typical.json` are readings of data-sheet graphs, which the tables of the two example files come from. The tests read `bzb984_fig7_typical.json` (`test_clamp_solver.py`), so don't move or delete these files. `skill/` holds the MCP server (`skill/server.py`), copies of the two example files for the skill's self-test (`skill/examples/`), the skill itself (`skill/SKILL.md`, the master copy) and `skill/build_package.py`, which builds the package installed in Claude Desktop (`SKILL.md` and `skill/examples/` only) into `dist/`, which is not committed.
+**Repository files.** `docs/project_guide.md` says what the app does, what the skill does, and the workflow from requirements to an approved design. `docs/bzb984_fig7_typical.json` and `docs/bat54cv_fig1_fig2_typical.json` are readings of data-sheet graphs, which the tables of the two example files come from. The tests read `bzb984_fig7_typical.json` (`test_clamp_solver.py`), so don't move or delete these files. `skill/` holds the MCP server (`skill/server.py`), copies of the two example files for the skill's self-test (`skill/examples/`), the skill itself (`skill/SKILL.md`, the master copy) and `skill/build_package.py`, which builds the package installed in Claude Desktop (`SKILL.md` and `skill/examples/` only) into `dist/`, which is not committed.
 
 ## 2. Architecture & State Management
 This project uses a strict Controller/Model/View decoupled architecture.
@@ -116,7 +116,7 @@ After ANY code change, run the test suite before committing:
 python -m pytest tests/ -v
 ```
 
-All 910 tests must pass. The UI tests carry the pytest marker `ui` (registered in `pytest.ini`); they need a desktop session and take a little over three minutes. While working, `python -m pytest tests/ -m "not ui"` runs the others in about 35 seconds. Run the whole suite before committing.
+All 915 tests must pass. The UI tests carry the pytest marker `ui` (registered in `pytest.ini`); they need a desktop session and take a little over three minutes. While working, `python -m pytest tests/ -m "not ui"` runs the others in about 35 seconds. Run the whole suite before committing.
 
 The non-UI tests still need the packages in `requirements.txt` installed: pytest imports `tests/test_ui.py` to collect it even when its tests are deselected, and one non-UI test (`test_plot_is_not_numpy` in `test_app_state.py`) imports the plot module. Only the UI tests also need a desktop session.
 
@@ -128,7 +128,7 @@ What each file covers:
 * `test_div_format.py`: the file format: the two example files and their stored results, every format and value problem, atomic write.
 * `test_divcheck.py`: the checker: summary, output files, the same `results` as the app's Save, exit codes, no GUI packages.
 * `test_mcp_server.py`: the MCP server: the same results, file text, summary and problems as `divcheck.py`, the copies in `skill/examples/`, the commit and `dirty` in every answer, the PNG and its curves against `AppState`'s sweep, no customtkinter, a client round trip in process, over stdio and over HTTP.
-* `test_skill_md.py`: the skill: the `SOLVER_VERSION` that `skill/SKILL.md` states is the solver's, every tool and field it names exists in `skill/server.py` (and every `.div` key in the format), no part named; the package of `skill/build_package.py` holds `SKILL.md` and `skill/examples/` only.
+* `test_skill_md.py`: the skill: the `SOLVER_VERSION` that `skill/SKILL.md` states is the solver's, every tool and field it names exists in `skill/server.py` (and every `.div` key in the format), the wording of its data-sheet and sourcing rules, no part named; the package of `skill/build_package.py` holds `SKILL.md` and `skill/examples/` only.
 * `test_file_io.py`: save and load round trip, other files refused, dirty tracking.
 * `test_app_state.py`: `AppState`: parsing, "needs input", range checks, the table states, loading and saving, open + save, "checked", the plot sweep.
 * `test_ui.py`: drives the real, withdrawn window through its widgets: every input, panel and tab, the tooltips, the plot. Three layout tests show the window at 1400×900 and are skipped on a screen it does not fit.
