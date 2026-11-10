@@ -68,7 +68,7 @@ A row says: at this current (mA), the voltage across the diode is between `v_min
 - Rows are in ascending current, and each voltage column rises from row to row.
 - In every row `v_min` ≤ `v_typ` ≤ `v_max`.
 - A table has no rows (`[]`) or at least two. `[]` means that direction is not modelled: the solver takes its current as zero, and the app says so.
-- A `null` cell is allowed; results that use that column then say "needs input". A table that is `null` is a blank too: not filled in yet, as opposed to `[]`, not modelled.
+- A `null` cell is allowed; results that use that column then say "needs input". A table that is `null` is a blank too: not filled in yet, as opposed to `[]`, not modelled. The app shows the two differently, keeps each as it is on save, and starts a new design with both tables `null`.
 
 How the solver reads a table: between two rows, ln(current) is linear in voltage. Below the first row and above the last, the nearest segment is extended. So give rows over the whole range of currents the design can reach, a few per decade where the curve bends.
 
@@ -236,6 +236,8 @@ The Schottky column shows why all eight corners are solved: below VDD the rail d
 It validates the file, solves it and prints a summary. With `out.div` it writes the file back with `results` filled in (`out.div` may be the same file as `in.div`). With `--json` it writes `results` alone.
 
 Exit code 0: the file was valid and solved, whatever the statuses. 1: the file was invalid; every problem is listed as `key.path: message`. 2: a file could not be read or written.
+
+The app writes a file back with every input exactly as it was read (`10` stays `10`, `10.0` stays `10.0`, `null` and `[]` stay), unless that input was edited in the app; only `results` is rewritten. An edited number is written as it was typed.
 
 The checker rejects a file for any problem. The app is more lenient with one kind: a value that is readable but unusable (out of range, table rows out of order) still opens, and the app lists it under "Fix:".
 

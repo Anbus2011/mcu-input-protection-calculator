@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageTk
 from src.core.app_state import AppState, LoadError
 from src.ui.input_panels import (
     ResistorPanel, ClampDiodePanel, McuPanel, SystemPanel, NotesPanel,
-    BandwidthInputPanel, MUTED,
+    BandwidthInputPanel, MUTED, _Tooltip, install_tooltip_dismissal,
 )
 from src.ui.output_panels import (
     ComponentsTab, SafetyTab, OperatingTab, BandwidthTab, CHECK_LABELS,
@@ -55,6 +55,9 @@ class MainWindow(ctk.CTk):
 
         # Close handler
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Tooltips go on scroll, click, focus loss, window move and tab change
+        install_tooltip_dismissal(self)
 
     # ── Icon ──────────────────────────────────────────────────────────────
 
@@ -228,7 +231,8 @@ class MainWindow(ctk.CTk):
         main.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Left panel — inputs
-        left = ctk.CTkScrollableFrame(main, width=470)
+        left = ctk.CTkScrollableFrame(main, width=480)
+        self.left_panel = left
         left.pack(side="left", fill="y", padx=(0, 5))
 
         self.resistor_panel = ResistorPanel(left, self.app_state)
@@ -264,7 +268,7 @@ class MainWindow(ctk.CTk):
         self.banner.pack(fill="x", padx=10, pady=(2, 0))
 
         # Tabs
-        self.tabs = ctk.CTkTabview(right, height=280)
+        self.tabs = ctk.CTkTabview(right, height=280, command=_Tooltip.hide_current)
         self.tabs.pack(fill="x", padx=5, pady=5)
 
         tab_comp = self.tabs.add("Component Analysis")

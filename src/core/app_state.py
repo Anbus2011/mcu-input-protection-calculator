@@ -21,6 +21,14 @@ values the app fills in by itself are the visible bandwidth starting values
 (constants.BANDWIDTH_STARTING_VALUES). There are no part presets: every
 clamp diode and MCU value comes from the .div file or from the user.
 
+Each clamp-diode table is in one of three states: blank (None: not filled
+in, needed), not modelled ([]: its current is taken as zero) or rows.
+
+A file that is opened and saved without editing gets every input back
+exactly as it was written (10 stays 10, 10.0 stays 10.0, null stays null):
+AppState remembers the value each field was loaded with and writes it back
+while the field's text is unchanged. An edited value is written as entered.
+
 Also handles file I/O (.div format 2.0, src/core/div_format.py) and
 dirty-tracking.
 """
@@ -112,6 +120,15 @@ FIELD_ORDER = {f.key: i for i, f in enumerate(FIELD_SPECS)}
 PATH_KEYS = {f.dotted: f.key for f in FIELD_SPECS}     # "mcu.vdd" -> "mcu.vdd", ...
 BANDWIDTH_KEYS = [f"bw.{n}" for n, _, _ in BANDWIDTH_FIELD_NAMES]
 
+# Table states
+BLANK, NOT_MODELLED, ROWS = "blank", "not modelled", "rows"
+
+# Editing a value of a part unticks that part's "checked against the data
+# sheet" box. Its name, source and note are not values.
+_NOT_VALUES = ("part", "source", "note", "checked")
+_WHOLE_NUMBER = re.compile(r"[+-]?\d+")
+_NEW = object()         # "created" of a design that has not been saved yet
+
 TABLE_LABELS = {"forward": "Forward table", "reverse": "Reverse table"}
 CELL_LABELS = {"i_ma": "current", "v_min": "V min", "v_typ": "V typ", "v_max": "V max"}
 _TABLE_PATH = re.compile(r"clamp_diode\.(forward|reverse)(?:\[(\d+)\](?:\.(\w+))?)?$")
@@ -182,7 +199,13 @@ class AppState:
 
         # Raw text of every field and of every table cell
         self.fields: dict = {}
-        self.tables: dict = {}       # "forward" / "reverse" -> [{row key: text}]
+        self.tables: dict = {}       # "forward" / "reverse" -> None, [] or [{row key: text}]
+        # What the open file held, so that an unedited input is saved back
+        # exactly as written: field key -> (text shown, JSON value), and per
+        # table row {row key: (text shown, JSON value)}.
+        self._origin: dict = {}
+        self._cell_origin: dict = {}
+        self._created = _NEW
         self._reset_fields()
 
         # Parsed state (rebuilt by recalculate)
@@ -271,35 +294,56 @@ class AppState:
             return
         self.fields[key] = text
         self.mark_dirty()
+        unticked = self._untick_checked([key])
         if FIELDS[key].kind != "text":
             self.recalculate()
+        if unticked:
+            self._fire_fields()
+
+    def _untick_checked(self, keys, explicit=()) -> bool:
+        """Editing a value of the clamp diode or the MCU unticks that part's
+        "checked against the data sheet" box. Returns True if a box changed."""
+        changed = False
+        for section in ("diode", "mcu"):
+            box = f"{section}.checked"
+            if box in explicit or self.fields[box] != "1":
+                continue
+            if any(k.startswith(section + ".") and k.split(".", 1)[1] not in _NOT_VALUES
+                   for k in keys):
+                self.fields[box] = "0"
+                changed = True
+        return changed
 
     def set_fields(self, values: dict) -> None:
         """Set several fields at once (one recalculation). The UI is told to
         show the new text."""
-        changed = False
+        changed = []
         for key, text in values.items():
             if key not in FIELDS:
                 raise KeyError(key)
             text = "" if text is None else str(text)
             if self.fields.get(key) != text:
                 self.fields[key] = text
-                changed = True
+                changed.append(key)
         if changed:
+            self._untick_checked(changed, explicit=values)
             self.mark_dirty()
             self.recalculate()
             self._fire_fields()
 
     def _reset_fields(self):
-        """Blank design: every field blank and both diode tables empty,
-        except visible unit selectors and the visible bandwidth starting
-        values."""
+        """Blank design: every field blank and both diode tables blank (not
+        filled in), except visible unit selectors and the visible bandwidth
+        starting values."""
         self.fields = {spec.key: ("0" if spec.kind == "bool" else "") for spec in FIELD_SPECS}
         for name, unit in NEW_DESIGN_UNITS.items():
             self.fields[f"{name}.unit"] = unit
         for name, value in BANDWIDTH_STARTING_VALUES.items():
             self.fields[f"bw.{name}"] = format_number(value)
-        self.tables = {t: [] for t in TABLES}
+        self.tables = {t: None for t in TABLES}
+        self._origin = {}
+        self._cell_origin = {t: [] for t in TABLES}
+        self._created = _NEW
 
     def fill_bandwidth_starting_values(self) -> list:
         """Fill blank or unreadable bandwidth fields from the starting values.
@@ -318,6 +362,12 @@ class AppState:
 
     # ── Clamp diode tables ────────────────────────────────────────────────
 
+    def table_state(self, table: str) -> str:
+        """BLANK (not filled in: needed), NOT_MODELLED (its current is taken
+        as zero) or ROWS."""
+        rows = self.tables[table]
+        return BLANK if rows is None else ROWS if rows else NOT_MODELLED
+
     def set_cell(self, table: str, row: int, key: str, text) -> None:
         """Store the text typed into one table cell."""
         text = "" if text is None else str(text)
@@ -325,29 +375,53 @@ class AppState:
             return
         self.tables[table][row][key] = text
         self.mark_dirty()
+        unticked = self._untick_checked(["diode.table"])
         self.recalculate()
+        if unticked:
+            self._fire_fields()
 
     def add_row(self, table: str) -> None:
-        """Append a blank row. Its cells are needed until filled in."""
+        """Append a blank row (a blank or not-modelled table becomes rows).
+        Its cells are needed until filled in."""
+        if not self.tables[table]:
+            self.tables[table], self._cell_origin[table] = [], []
         self.tables[table].append({key: "" for key in ROW_KEYS})
+        self._cell_origin[table].append({})
         self._tables_changed()
 
     def delete_row(self, table: str, row: int) -> None:
+        """Delete a row. Deleting the last row leaves the table blank."""
         del self.tables[table][row]
+        del self._cell_origin[table][row]
+        if not self.tables[table]:
+            self.tables[table] = None
         self._tables_changed()
 
-    def set_table(self, table: str, rows) -> None:
-        """Replace a whole table. *rows* is a list of {i_ma, v_min, v_typ,
-        v_max}; numbers or text."""
-        new = [{key: ("" if row[key] is None else
-                      row[key] if isinstance(row[key], str) else format_number(row[key]))
-                for key in ROW_KEYS} for row in rows]
+    def set_not_modelled(self, table: str, not_modelled: bool) -> None:
+        """For a table with no rows: [] (not modelled, current taken as zero)
+        or None (blank: not filled in, needed). No effect on a table with rows."""
+        if self.tables[table]:
+            return
+        new = [] if not_modelled else None
         if new != self.tables[table]:
             self.tables[table] = new
             self._tables_changed()
 
+    def set_table(self, table: str, rows) -> None:
+        """Replace a whole table. *rows* is None (blank), [] (not modelled)
+        or a list of {i_ma, v_min, v_typ, v_max}; numbers or text."""
+        new = None if rows is None else [
+            {key: ("" if row[key] is None else
+                   row[key] if isinstance(row[key], str) else format_number(row[key]))
+             for key in ROW_KEYS} for row in rows]
+        if new != self.tables[table]:
+            self.tables[table] = new
+            self._cell_origin[table] = [{} for _ in new or []]
+            self._tables_changed()
+
     def _tables_changed(self):
         self.mark_dirty()
+        self._untick_checked(["diode.table"])
         self.recalculate()
         self._fire_fields()
 
@@ -359,7 +433,15 @@ class AppState:
             raw = self.fields.get(spec.key, "")
             text = raw.strip()
             values[spec.key] = None
-            if spec.kind == "text":
+            origin = self._origin.get(spec.key)
+            if origin is not None and origin[0] == raw:
+                # Not edited since the file was opened: the value as written
+                values[spec.key] = origin[1]
+                if spec.kind in ("float", "int") and origin[1] is not None:
+                    message = solver.number_problem(spec.dotted, origin[1])
+                    if message is not None:
+                        problems[spec.dotted] = message
+            elif spec.kind == "text":
                 values[spec.key] = raw
             elif text == "":
                 pass
@@ -397,6 +479,8 @@ class AppState:
                         unreadable.add(spec.key)
                         continue
                     v = int(v)
+                elif _WHOLE_NUMBER.fullmatch(text):
+                    v = int(text)       # written as entered: 10 stays 10
                 values[spec.key] = v
                 # Range rules are the solver's (one set for app, file and solver)
                 message = solver.number_problem(spec.dotted, v)
@@ -418,18 +502,27 @@ class AppState:
 
         cells, unreadable_cells = {}, set()
         for table in TABLES:
+            if self.tables[table] is None:      # blank: needed, not a problem
+                cells[table] = None
+                continue
             rows = []
             for i, row in enumerate(self.tables[table]):
                 parsed = {}
                 for key in ROW_KEYS:
                     text = row[key].strip()
                     parsed[key] = None
+                    origin = self._cell_origin[table][i].get(key)
+                    if origin is not None and origin[0] == row[key]:
+                        parsed[key] = origin[1]         # as written in the file
+                        continue
                     if text == "":
                         continue
                     try:
                         parsed[key] = float(text)
                         if not math.isfinite(parsed[key]):
                             raise ValueError
+                        if _WHOLE_NUMBER.fullmatch(text):
+                            parsed[key] = int(text)
                     except ValueError:
                         parsed[key] = math.nan
                         problems[f"clamp_diode.{table}[{i}].{key}"] = f"'{text}' is not a number"
@@ -453,12 +546,17 @@ class AppState:
             if path == "version":
                 return div_format.FORMAT_VERSION
             if path == "created":
-                return None
+                return None if self._created is _NEW else self._created
             if kind == div_format.TABLE:
-                return [dict(row) for row in self._cells[path.rsplit(".", 1)[1]]]
+                rows = self._cells[path.rsplit(".", 1)[1]]
+                return None if rows is None else [dict(row) for row in rows]
             key = PATH_KEYS[path]
             if kind == div_format.TEXT:
-                return self.fields[key]
+                # Read from the field itself: editing free text does not
+                # recalculate, so the parsed values may be older than it.
+                origin = self._origin.get(key)
+                unedited = origin is not None and origin[0] == self.fields[key]
+                return origin[1] if unedited else self.fields[key]
             if kind == div_format.FLAG:
                 return bool(v[key])
             if key in self._unreadable:
@@ -519,7 +617,8 @@ class AppState:
                                             if p not in c.blocked("worst")]
         self.plot_data = {}
         if not typ_block or not worst_block:
-            start = min(0.0, vin_min) if vin_min is not None else 0.0
+            start = float(min(0.0, vin_min)) if vin_min is not None else 0.0
+            vin_max = float(vin_max)
             v_in = [start + (vin_max - start) * i / (PLOT_POINTS - 1)
                     for i in range(PLOT_POINTS)]
             v_in[-1] = vin_max
@@ -602,7 +701,8 @@ class AppState:
         if bad:
             raise ValueError(self._unreadable_message(bad))
         data = self._file_dict()
-        data["created"] = datetime.now().isoformat()
+        if self._created is _NEW:       # first save of a new design
+            data["created"] = datetime.now().isoformat()
         return div_format.with_results(data, self.results)
 
     @staticmethod
@@ -615,7 +715,7 @@ class AppState:
     def parse_file_data(data) -> tuple:
         """Validate a whole .div dict without touching any state.
 
-        Returns (fields, tables, value_problems). Raises LoadError listing
+        Returns (fields, tables, value_problems, origins). Raises LoadError listing
         every format problem (wrong version, missing or unknown key, wrong
         type, unknown unit ...), each starting with its key path. Values
         that are readable but unusable (out of range, table rows out of
@@ -627,35 +727,34 @@ class AppState:
         if broken:
             raise LoadError("\n".join(str(p) for p in broken))
 
-        fields = {}
+        def shown(raw):
+            return "" if raw is None else raw if isinstance(raw, str) else format_number(raw)
+
+        fields, origin = {}, {}
         for spec in FIELD_SPECS:
             raw = solver.lookup(data, spec.dotted)
-            if spec.kind == "bool":
-                fields[spec.key] = "1" if raw else "0"
-            elif raw is None:
-                fields[spec.key] = ""
-            elif isinstance(raw, str):
-                fields[spec.key] = raw
-            else:
-                fields[spec.key] = format_number(raw)
-        tables = {}
+            fields[spec.key] = ("1" if raw else "0") if spec.kind == "bool" else shown(raw)
+            origin[spec.key] = (fields[spec.key], raw)
+        tables, cell_origin = {}, {}
         for table in TABLES:
             rows = data["clamp_diode"][table]
-            if rows is None:
-                # A null table is "not filled in yet", not "not modelled":
-                # show two blank rows, which the results keep asking for.
-                rows = [dict.fromkeys(ROW_KEYS)] * 2
-            tables[table] = [{key: "" if row[key] is None else format_number(row[key])
-                              for key in ROW_KEYS} for row in rows]
-        return fields, tables, [p for p in problems if p.kind == div_format.VALUE]
+            # null stays blank (not filled in); [] stays "not modelled"
+            tables[table] = None if rows is None else [
+                {key: shown(row[key]) for key in ROW_KEYS} for row in rows]
+            cell_origin[table] = [{key: (shown(row[key]), row[key]) for key in ROW_KEYS}
+                                  for row in rows or []]
+        origins = {"fields": origin, "cells": cell_origin, "created": data["created"]}
+        return fields, tables, [p for p in problems if p.kind == div_format.VALUE], origins
 
     def load_data(self, data: dict) -> list:
         """Validate *data* fully, then replace the design with it. Stored
         results are ignored: the design is solved again. Returns load
         warnings. On LoadError nothing has changed."""
-        fields, tables, value_problems = self.parse_file_data(data)
+        fields, tables, value_problems, origins = self.parse_file_data(data)
         with self.suspend_changes():
             self.fields, self.tables = fields, tables
+            self._origin, self._cell_origin = origins["fields"], origins["cells"]
+            self._created = origins["created"]
             self.recalculate()
             self._fire_fields()
         warnings = []
@@ -684,6 +783,7 @@ class AppState:
         except Exception as e:
             self.last_save_error = f"Failed to save {filepath}:\n{e}"
             return False
+        self._created = data["created"]
         self.current_file = filepath
         self.is_dirty = False
         self._fire_title()

@@ -149,7 +149,7 @@ R_series blank or 0 means there is no series resistor; its unit, rating and tole
 | Forward / Reverse | The two tables, see below |
 | Source | One line: data sheet, revision, tables or figures used |
 | Note | How each column of the tables was obtained |
-| Checked against the data sheet | Tick it once you have compared the values with the data sheet |
+| Checked against the data sheet | Tick it once you have compared the values with the data sheet. Editing any value of the diode afterwards (a table cell included) unticks it; editing Part, Source or Note does not |
 
 The usual connections:
 
@@ -163,8 +163,17 @@ The usual connections:
 
 - Rows go in ascending current, and each voltage column rises from row to row.
 - In every row V min ≤ V typ ≤ V max.
-- **+ Add row** adds a blank row; **×** deletes a row. A table has no rows or at least two.
-- A table with no rows means that direction is not modelled, and the panel says so ("no reverse data: leakage not included").
+- **+ Add row** (under the table) adds a blank row; **×** deletes a row. A table with rows needs at least two.
+
+Each table is in one of three states, and the panel says which:
+
+| State | Shown as | Meaning |
+|-------|----------|---------|
+| Blank | "Not filled in: needs input" | Nothing has been entered yet. The table is listed under `Needs input` and the results that use it wait for it. A new design starts here. |
+| Not modelled | "Not modelled: current taken as zero" | There is no data for this direction and it is left out on purpose. |
+| Rows | the table | The data-sheet points. |
+
+The **Not modelled** box next to "+ Add row" switches a table with no rows between blank and not modelled. Adding a row turns either into rows; deleting the last row returns the table to blank.
 
 Between two rows the solver takes ln(current) as linear in voltage; below the first row and above the last it extends the nearest segment. So enter rows over the whole range of currents the design can reach. V min is the part that conducts most and V max the part that conducts least; fold temperature extremes into those two columns.
 
@@ -182,7 +191,7 @@ Between two rows the solver takes ln(current) as linear in voltage; below the fi
 | VIH factor | Pin input-high threshold as a fraction of VDD (STM32G4: 0.7, DS12983 Rev 5, Table 54) |
 | C_pin | Pin capacitance (pF) |
 | Min pulse width | Shortest pulse the input peripheral accepts (ns) |
-| Source, Note, Checked | As for the clamp diode |
+| Source, Note, Checked | As for the clamp diode: editing any MCU value unticks "Checked" |
 
 #### System Requirements
 
@@ -303,6 +312,7 @@ The title bar shows the current filename and an asterisk (*) when there are unsa
 - A value that is readable but can't be used (out of range, table rows out of order) still opens; it is listed after `Fix:`.
 - `null` values load blank; one warning lists those the results need.
 - Stored results are ignored when a file is opened: the design is solved again.
+- A file that is opened and saved without editing gets every input back exactly as it was written (`10` stays `10`, `10.0` stays `10.0`, `null` stays `null`). A value you edit is written as you entered it. Only `results` can change.
 - Format 1.0 files (from before version 2.0 of the format) are not read, and there is no converter.
 
 ---
@@ -405,7 +415,7 @@ Everything else about a part (diode tables, capacitance, MCU limits, pin capacit
 python -m pytest tests/ -v
 ```
 
-All 725 tests must pass. `tests/test_ui.py` drives the real window (withdrawn), so it needs a desktop session and takes about two minutes. Its tests carry the marker `ui`; to run the rest in a few seconds:
+All 789 tests must pass. `tests/test_ui.py` drives the real window (withdrawn), so it needs a desktop session and takes about three minutes. Its tests carry the marker `ui`; to run the rest in a few seconds:
 
 ```bash
 python -m pytest tests/ -m "not ui"

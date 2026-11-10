@@ -197,12 +197,11 @@ def change(design, **overrides):
 
 
 def blank_design():
-    """Every value blank (null), as the app saves a new design."""
+    """Every value blank (null), both diode tables included, as the app
+    saves a new design before anything is entered."""
     def blank(node):
         if isinstance(node, dict):
             return {k: blank(v) for k, v in node.items()}
-        if isinstance(node, list):
-            return []
         return False if isinstance(node, bool) else None
     design = blank(zener_reference())
     design["version"] = "2.0"
@@ -235,7 +234,7 @@ def typed(design=None):
     """(fields, tables): the field text and table cell text of *design* (the
     baseline by default), as AppState holds them."""
     from src.core.app_state import AppState
-    fields, tables, _ = AppState.parse_file_data(design or zener_reference())
+    fields, tables, _problems, _origins = AppState.parse_file_data(design or zener_reference())
     return fields, tables
 
 

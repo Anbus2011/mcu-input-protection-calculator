@@ -209,7 +209,9 @@ class TestNoHiddenDefaults:
             if key.startswith("bw.") or spec.kind == "unit":
                 continue
             assert s.fields[key] == ("0" if spec.kind == "bool" else ""), key
-        assert s.tables == {"forward": [], "reverse": []}
+        assert s.tables == {"forward": None, "reverse": None}      # blank, not "not modelled"
+        assert s.table_state("forward") == s.table_state("reverse") == "blank"
+        assert "Forward table" in s.report.needs and "Reverse table" in s.report.needs
         assert s.circuit.v["resistors.r1"] is None and s.design["mcu"]["vdd"] is None
         assert s.design["clamp_diode"]["anode"] is None
         assert s.design["system"]["v_input_max"] is None
@@ -220,7 +222,7 @@ class TestNoHiddenDefaults:
         s = ref_state()
         s.file_new()
         assert s.fields["r1.value"] == "" and s.fields["diode.part"] == ""
-        assert s.tables == {"forward": [], "reverse": []}
+        assert s.tables == {"forward": None, "reverse": None}
         assert s.details["k_nominal"] is None and not s.is_dirty
 
     def test_blank_vdd_shows_needs_input_but_rest_computes(self):
@@ -259,7 +261,7 @@ class TestNoHiddenDefaults:
         assert data["resistors"]["r1"]["value"] is None
         assert data["mcu"]["vdd"] is None
         assert data["clamp_diode"]["type"] is None and data["clamp_diode"]["anode"] is None
-        assert data["clamp_diode"]["forward"] == [] and data["clamp_diode"]["reverse"] == []
+        assert data["clamp_diode"]["forward"] is None and data["clamp_diode"]["reverse"] is None
         assert data["clamp_diode"]["checked"] is False
         assert data["system"]["v_touch"] is None
         assert div_format.validate(data) == []
@@ -627,13 +629,38 @@ class TestLoading:
         for t in empty:
             assert f'    "{t}": []' in text          # written as [], not as rows or null
 
-    def test_null_table_loads_as_two_blank_rows(self, tmp_path):
+    @pytest.mark.parametrize("blank", [("forward",), ("reverse",), ("forward", "reverse")],
+                             ids=["forward", "reverse", "both"])
+    def test_null_table_round_trips_as_null(self, tmp_path, blank):
+        """Open a file whose table is null, save without editing: still null
+        ("not filled in"), not rows of null cells and not []. The table is
+        needed, and the results that use it wait for it."""
+        data = zener_reference(**{f"clamp_diode__{t}": None for t in blank})
+        s = AppState()
+        warnings = s.open_file(write_json(tmp_path, data))
+        assert not s.is_dirty
+        for t in blank:
+            assert s.tables[t] is None and s.table_state(t) == "blank"
+            label = "Forward table" if t == "forward" else "Reverse table"
+            assert label in s.report.needs and label in warnings[0]
+        assert s.details["v_pin_typ"] is None and s.details["k_nominal"] is not None
+        out = saved(s, tmp_path, "out.div")
+        for t in ("forward", "reverse"):
+            assert out["clamp_diode"][t] == data["clamp_diode"][t]
+        text = open(str(tmp_path / "out.div"), encoding="utf-8").read()
+        for t in blank:
+            assert out["clamp_diode"][t] is None and f'    "{t}": null' in text
+
+    def test_null_and_empty_are_different_states(self, tmp_path):
         """null = not filled in yet (results keep asking); [] = not modelled."""
         s = AppState()
         s.open_file(write_json(tmp_path, zener_reference(clamp_diode__forward=None)))
-        assert s.tables["forward"] == [dict(i_ma="", v_min="", v_typ="", v_max="")] * 2
-        assert "Forward table row 1 current" in s.report.needs
-        assert s.details["v_pin_typ"] is None
+        assert s.table_state("forward") == "blank" and s.details["v_pin_typ"] is None
+        assert s.report.needs == ["Forward table"] and s.report.problems == []
+        s.set_not_modelled("forward", True)
+        assert s.tables["forward"] == [] and s.table_state("forward") == "not modelled"
+        assert s.report.lines() == [] and s.details["v_pin_typ"] is not None
+        assert s.is_dirty
 
 
 # ── Clamp diode: tables, connection, type, "checked" ─────────────────────────
@@ -661,9 +688,26 @@ class TestClampDiode:
         assert "Forward table row 1 current" in s.report.needs
         assert any(p.startswith("Forward table: needs at least 2 rows") for p in s.report.problems)
         assert s.details["v_pin_typ"] is None
+        # deleting the last row leaves the table blank (not filled in): needed
         s.delete_row("forward", 0)
+        assert s.tables["forward"] is None and s.table_state("forward") == "blank"
+        assert s.report.needs == ["Forward table"] and s.report.problems == []
+        assert s.details["v_pin_typ"] is None and calls == [1, 1]
+        # "Not modelled" switches a table with no rows between blank and []
+        s.set_not_modelled("forward", True)
         assert s.tables["forward"] == [] and s.report.lines() == []
-        assert s.details["v_pin_typ"] is not None and calls == [1, 1]
+        assert s.details["v_pin_typ"] is not None and calls == [1, 1, 1]
+        s.set_not_modelled("forward", False)
+        assert s.tables["forward"] is None and s.report.needs == ["Forward table"]
+        # "+ Add row" turns either state into rows
+        s.add_row("forward")
+        assert s.table_state("forward") == "rows" and len(s.tables["forward"]) == 1
+        s.set_not_modelled("forward", True)            # no effect on a table with rows
+        assert len(s.tables["forward"]) == 1
+        s.delete_row("forward", 0)
+        s.set_not_modelled("forward", True)
+        s.add_row("forward")
+        assert s.table_state("forward") == "rows"
 
     def test_empty_table_is_not_modelled_and_not_needed(self):
         s = ref_state()
@@ -747,6 +791,188 @@ class TestClampDiode:
         s2.open_file(str(tmp_path / "s.div"))
         assert s2.fields["diode.checked"] == "1" and s2.fields["mcu.checked"] == "0"
         assert s2.fields["mcu.note"] == "checked by DK"
+
+
+# ── Open + save without editing gives the inputs back exactly ────────────────
+
+def input_text(path):
+    """A saved file's text up to its "results" section."""
+    text = open(path, encoding="utf-8").read()
+    return text[:text.index('  "results": {')]
+
+
+class TestExactRoundTrip:
+    @pytest.mark.parametrize("path", [ZENER_DIV, SCHOTTKY_DIV], ids=["zener", "schottky"])
+    def test_example_file_comes_back_identical(self, path, tmp_path):
+        """Every input section exactly as written; the results too, since the
+        solver has not changed."""
+        s = AppState()
+        s.open_file(path)
+        out = str(tmp_path / "out.div")
+        assert s.save_to_file(out)
+        assert input_text(out) == input_text(path)
+        assert open(out, encoding="utf-8").read() == open(path, encoding="utf-8").read()
+
+    def test_whole_numbers_and_decimals_stay_as_written(self, tmp_path):
+        """10 stays 10 and 10.0 stays 10.0; "created" and null text stay too."""
+        data = zener_reference(created="2026-01-02T03:04:05", notes=None,
+                               clamp_diode__source=None, mcu__checked=True)
+        data["resistors"]["r1"]["value"] = 10.0
+        data["resistors"]["r2"]["value"] = 18
+        data["mcu"]["v_absolute_max"] = 4.0
+        data["mcu"]["adc_bits"] = 12
+        data["system"]["v_input_max"] = 30.0
+        data["clamp_diode"]["reverse"][9] = dict(i_ma=1.0, v_min=2.51, v_typ=2.69, v_max=2.91)
+        data["clamp_diode"]["reverse"][10]["i_ma"] = 2
+        s = AppState()
+        s.open_file(write_json(tmp_path, data))
+        assert s.fields["r1.value"] == "10" and s.fields["r2.value"] == "18"   # shown the same
+        out = saved(s, tmp_path, "out.div")
+        out.pop("results")
+        assert out == data
+        for path, kind in ((("resistors", "r1", "value"), float),
+                           (("resistors", "r2", "value"), int),
+                           (("mcu", "v_absolute_max"), float), (("mcu", "adc_bits"), int),
+                           (("system", "v_input_max"), float)):
+            node = out
+            for part in path:
+                node = node[part]
+            assert type(node) is kind, path
+        assert type(out["clamp_diode"]["reverse"][9]["i_ma"]) is float
+        assert type(out["clamp_diode"]["reverse"][10]["i_ma"]) is int
+        assert out["created"] == "2026-01-02T03:04:05" and out["notes"] is None
+        assert out["clamp_diode"]["source"] is None and out["mcu"]["checked"] is True
+        text = open(str(tmp_path / "out.div"), encoding="utf-8").read()
+        assert '"r1": {"value": 10.0, ' in text and '"r2": {"value": 18, ' in text
+
+    def test_edited_value_is_written_as_entered(self, tmp_path):
+        s = AppState()
+        s.open_file(ZENER_DIV)
+        s.set_fields({"r1.value": "12", "r2.value": "18.0", "mcu.vdd": "3.30",
+                      "system.v_input_max": "2.4e1", "mcu.part": "STM32G431"})
+        s.set_cell("reverse", 12, "v_typ", "3.6")
+        s.set_cell("reverse", 12, "i_ma", "11")
+        out = saved(s, tmp_path, "out.div")
+        r1, r2 = out["resistors"]["r1"]["value"], out["resistors"]["r2"]["value"]
+        assert (r1, type(r1)) == (12, int) and (r2, type(r2)) == (18.0, float)
+        assert out["mcu"]["vdd"] == 3.3 and out["system"]["v_input_max"] == 24.0
+        assert type(out["system"]["v_input_max"]) is float
+        assert out["mcu"]["part"] == "STM32G431"
+        row = out["clamp_diode"]["reverse"][12]
+        assert row == dict(i_ma=11, v_min=3.37, v_typ=3.6, v_max=3.77)
+        assert type(row["i_ma"]) is int
+        # everything that was not edited is as it was in the file
+        original = div_format.read_json(ZENER_DIV)
+        assert out["resistors"]["r_series"] == original["resistors"]["r_series"]
+        assert out["clamp_diode"]["reverse"][:12] == original["clamp_diode"]["reverse"][:12]
+        assert out["created"] == original["created"]
+
+    def test_typing_the_same_text_back_keeps_the_written_value(self, tmp_path):
+        data = zener_reference()
+        data["mcu"]["v_absolute_max"] = 4.0
+        s = AppState()
+        s.open_file(write_json(tmp_path, data))
+        s.set_field("mcu.v_absolute_max", "4.5")
+        s.set_field("mcu.v_absolute_max", "4")
+        out = saved(s, tmp_path, "out.div")
+        assert type(out["mcu"]["v_absolute_max"]) is float
+
+    def test_created_is_set_once(self, tmp_path):
+        s = ref_state()
+        first = saved(s, tmp_path, "a.div")["created"]
+        assert first[:2] == "20"
+        s.set_field("r1.value", "11")
+        assert saved(s, tmp_path, "b.div")["created"] == first
+        s.file_new()
+        assert s.design["created"] is None
+
+    def test_results_are_unchanged_by_the_round_trip(self):
+        for path in (ZENER_DIV, SCHOTTKY_DIV):
+            s = AppState()
+            s.open_file(path)
+            stored = div_format.read_json(path)
+            assert div_format.results_for_file(s.results) == stored["results"]
+            assert div_format.results_for_file(solve(stored)) == stored["results"]
+
+
+# ── "Checked against the data sheet" is unticked by an edit of a value ───────
+
+class TestCheckedBox:
+    def ticked(self, design=None):
+        s = app_state(design)
+        s.set_fields({"diode.checked": "1", "mcu.checked": "1"})
+        s.is_dirty = False
+        return s
+
+    @pytest.mark.parametrize("key,text", [
+        ("diode.type", "schottky"), ("diode.anode", "node"), ("diode.cathode", "vdd"),
+        ("diode.capacitance_pf", "400"), ("diode.ptot_mw", "300")])
+    def test_diode_value_unticks_the_diode_only(self, key, text):
+        s = self.ticked()
+        calls = []
+        s.set_fields_callback(lambda: calls.append(1))
+        s.set_field(key, text)
+        assert s.fields["diode.checked"] == "0" and s.fields["mcu.checked"] == "1"
+        assert calls == [1]                     # the UI is told to untick the box
+        assert s.design["clamp_diode"]["checked"] is False
+
+    @pytest.mark.parametrize("key", ["mcu.pin_type", "mcu.vdd", "mcu.v_recommended_max",
+                                     "mcu.v_absolute_max", "mcu.v_pin_min", "mcu.adc_bits",
+                                     "mcu.vil_factor", "mcu.vih_factor", "mcu.c_pin_pf",
+                                     "mcu.t_pulse_min_ns"])
+    def test_mcu_value_unticks_the_mcu_only(self, key):
+        s = self.ticked()
+        s.set_field(key, "0.5")
+        assert s.fields["mcu.checked"] == "0" and s.fields["diode.checked"] == "1"
+
+    @pytest.mark.parametrize("edit", [
+        lambda s: s.set_cell("reverse", 3, "v_typ", "1.6"),
+        lambda s: s.add_row("forward"),
+        lambda s: s.delete_row("reverse", 12),
+        lambda s: s.set_not_modelled("forward", False),
+        lambda s: s.set_table("reverse", [])], ids=["cell", "add row", "delete row",
+                                                    "not modelled", "set table"])
+    def test_table_edit_unticks_the_diode(self, edit):
+        s = self.ticked()
+        edit(s)
+        assert s.fields["diode.checked"] == "0" and s.fields["mcu.checked"] == "1"
+
+    @pytest.mark.parametrize("key", ["diode.part", "diode.source", "diode.note",
+                                     "mcu.part", "mcu.source", "mcu.note", "notes",
+                                     "r1.value", "system.v_input_max", "bw.c_stray_pf"])
+    def test_name_source_note_and_other_panels_leave_it_ticked(self, key):
+        s = self.ticked()
+        s.set_field(key, "7")
+        assert s.fields["diode.checked"] == "1" and s.fields["mcu.checked"] == "1"
+        assert s.is_dirty
+
+    def test_same_text_is_not_an_edit(self):
+        s = self.ticked()
+        s.set_field("mcu.vdd", s.fields["mcu.vdd"])
+        s.set_cell("reverse", 0, "i_ma", s.tables["reverse"][0]["i_ma"])
+        assert s.fields["mcu.checked"] == "1" and s.fields["diode.checked"] == "1"
+        assert not s.is_dirty
+
+    def test_ticking_again_stays_until_the_next_edit(self, tmp_path):
+        s = self.ticked()
+        s.set_field("mcu.vdd", "3.0")
+        s.set_field("mcu.checked", "1")
+        assert saved(s, tmp_path)["mcu"]["checked"] is True
+        s.set_field("mcu.c_pin_pf", "6")
+        assert saved(s, tmp_path)["mcu"]["checked"] is False
+
+    def test_opening_a_file_does_not_untick(self, tmp_path):
+        data = zener_reference(clamp_diode__checked=True, mcu__checked=True)
+        s = AppState()
+        s.open_file(write_json(tmp_path, data))
+        assert s.fields["diode.checked"] == "1" and s.fields["mcu.checked"] == "1"
+        out = saved(s, tmp_path, "out.div")
+        assert out["clamp_diode"]["checked"] is True and out["mcu"]["checked"] is True
+
+    def test_setting_the_box_together_with_values_keeps_what_was_set(self):
+        s = self.ticked()
+        s.set_fields({"mcu.vdd": "3.0", "mcu.checked": "1", "diode.ptot_mw": "300"})
+        assert s.fields["mcu.checked"] == "1" and s.fields["diode.checked"] == "0"
 
 
 # ── New MCU and system values ────────────────────────────────────────────────

@@ -8,8 +8,8 @@ The baseline is the suite on branch `bug-fixes` (commit `69564fa`): 401 tests. T
 | Kept (not listed here) | 260 |
 | Rewritten | 47 |
 | Removed | 94 |
-| Added since | 418 |
-| **Suite when this file was written** | **725** |
+| Added since | 482 |
+| **Suite when this file was written** | **789** |
 
 - **Removed**: nothing tests that thing any more, because the thing itself is gone.
 - **Rewritten**: the thing tested was replaced or redefined by the brief (`docs/session2_prompt.md`) or by a later owner decision, and the test now checks what replaced it.
@@ -234,7 +234,7 @@ These tests still check the same behaviour, but an expected value or an assertio
 | `test_solver_rules.py::TestSolverSettling::test_low_value_divider_converges` | The closed form was the old model above IZT (28.375 / 2.7 V); it is now the extended last table segment. |
 | `test_solver_rules.py::TestWorstCasePower::test_hand_checked_r1_corner` | New hand calculation on the minimum column: 2.8477 V and 74.47 mW (was 2.98659 V and 73.71 mW). The corner is named "diode min" instead of "VZ min". |
 | `test_app_state.py::test_reference_case_through_app_state` | The same numbers as `test_reference_values`. |
-| `test_ui.py::test_reference_typed_through_widgets` | 3.177 → 3.020 V, 3.433 → 3.235 V, 2.51 → 2.53 mA. It now also types the 13 rows of the reverse table. |
+| `test_ui.py::test_reference_typed_through_widgets` | 3.177 → 3.020 V, 3.433 → 3.235 V, 2.51 → 2.53 mA. It now also types the 13 rows of the reverse table and ticks "Not modelled" for the forward table. |
 | `test_ui.py::test_new_design_clears_everything`, `test_save_and_reopen` | 3.177 → 3.020 V. |
 | `test_ui.py::test_low_value_divider_converges_without_warning` | The expected text was the old closed form; it is now AppState's value, checked to lie between 4 and 5 V. |
 | `test_ui.py::test_power_typical_and_worst_shown` | R1 worst-case power 73.7 → 74.5 mW. |
@@ -269,10 +269,10 @@ These tests still check the same behaviour, but an expected value or an assertio
 | `test_frequency.py::TestEdgeCases::test_zero_resistance`, `test_invalid_thresholds_no_crash` | The unusable value is R1 = 0 (was a τ resistance of 0), and a VIH factor of 0.95 (was VIH 5 V). |
 | `test_file_io.py::TestFileRoundTrip::test_save_and_reload` | The Zener fields became clamp-diode fields and a two-row reverse table. |
 | `test_file_io.py::TestFileRoundTrip::test_json_format_version` | Version "2.0" (was "1.0"); the `clamp_diode`, `bandwidth` and `results` sections (was `zener`). |
-| `test_app_state.py::TestNoHiddenDefaults::test_app_starts_blank`, `test_new_design_is_blank`, `test_saved_blank_is_null` | The Zener and preset assertions became clamp-diode fields and empty tables. |
+| `test_app_state.py::TestNoHiddenDefaults::test_app_starts_blank`, `test_new_design_is_blank`, `test_saved_blank_is_null` | The Zener and preset assertions became clamp-diode fields and blank (`null`) tables. |
 | `test_app_state.py::TestBandwidthStartingValues` (3 kept tests) | The bandwidth fields are C_stray and the margin factor. |
 | `test_app_state.py::TestUnreadableBlocksSave::test_out_of_range_does_not_block_save` | Extended: the saved file opens again and lists the value to fix. |
 | `test_app_state.py::TestAtomicSave::test_failed_write_keeps_existing_file` | The simulated failure is patched into `div_format` (the writer moved there). |
 | `test_app_state.py::TestLoading` (kept cases), `test_ui.py::test_malformed_file_keeps_current_design`, `test_failed_load_keeps_change_tracking` | The file under test is built from the baseline design or is an example file (was `results.div`). The UI test also checks that every problem is listed. |
 | `test_ui.py::test_unit_combo_and_checkbox` | The checkbox is the clamp diode's "checked" box (was "Counter signed"). |
-| `test_ui.py::test_new_design_clears_everything` | Rows whose optional input is blank show "--". Of the 0 V row only its input voltage is independent of the inputs now. The diode tables are checked to be empty (was: the preset selector is blank). |
+| `test_ui.py::test_new_design_clears_everything` | Rows whose optional input is blank show "--". Of the 0 V row only its input voltage is independent of the inputs now. The diode tables are checked to be blank, "Not filled in" (was: the preset selector is blank). |

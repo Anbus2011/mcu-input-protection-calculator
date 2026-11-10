@@ -28,13 +28,15 @@ class PlotCanvas(ctk.CTkFrame):
         header.pack(fill="x", padx=10, pady=5)
         ctk.CTkLabel(header, text="V_mcu vs V_input", font=("", 14, "bold")).pack(side="left")
 
-        ctk.CTkLabel(header, text="Theme:").pack(side="right", padx=(10, 2))
+        # Packed from the right: the drop-down first, so "Theme:" sits before it
         self.theme_var = ctk.CTkOptionMenu(
             header, values=["Dark", "Light"], width=80,
             command=self._on_theme_change
         )
         self.theme_var.set("Dark")
         self.theme_var.pack(side="right")
+        self.theme_label = ctk.CTkLabel(header, text="Theme:")
+        self.theme_label.pack(side="right", padx=(10, 6))
 
         self.fig = Figure(figsize=(8, 4))
         self.ax = self.fig.add_subplot(111)
