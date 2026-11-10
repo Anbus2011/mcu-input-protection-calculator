@@ -143,8 +143,10 @@ class TestSkillMd:
         start = text.split("## Start of every session")[1].split("\n## ")[0]
         assert start.index("`solver_info`") < start.index("`solve_div`")
         assert '"server dirty: true"' in start and "`commit`" in start
-        assert start.count("stop") >= 2              # a version mismatch, the self-test
-        assert "examples/" in start
+        assert "`commit_reason`" in start and "`dirty_reason`" in start
+        # stops: a version mismatch, a self-test that differs, no examples
+        assert start.count("stop") >= 3
+        assert "examples/" in start and "with code" in start
 
     def test_names_no_part_vendor_or_data_sheet(self):
         """Part-agnostic, as the code is (the same patterns)."""

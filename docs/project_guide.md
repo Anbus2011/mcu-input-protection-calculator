@@ -26,7 +26,7 @@ What this project is for, what the planned Claude skill will do, and the workflo
 
 ## 2. What the skill will be
 
-The skill is not built yet. It will be a Claude skill that designs the protection network for one input and writes its `.div`.
+`skill/SKILL.md` is written and not yet tested live in a Claude chat. It is a Claude skill that designs the protection network for one input and writes its `.div`.
 
 **Deterministic, through the MCP server:**
 - the solver, reached through an MCP server that lives in `skill/` in this repository. The server imports `src/models/clamp_solver.py` and `src/core/div_format.py` directly, so the repository holds the only copy of the solver. Its tools take the contents of a `.div` (not a file path, so the server can run on another machine), validate and solve it, return the file with `results` filled in and draw the plot. Every call also returns `SOLVER_VERSION`, the commit the server is running and `dirty` (true when the server's folder had uncommitted changes when it started). The server does no math of its own, chooses no values and reads or writes no files.
