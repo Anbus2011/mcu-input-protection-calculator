@@ -148,6 +148,36 @@ class TestSkillMd:
         assert start.count("stop") >= 3
         assert "examples/" in start and "with code" in start
 
+    @pytest.mark.parametrize("wording", [
+        ["which folder holds the board's data sheets", "once per board",
+         "saved with the requirements", "the user's copy in that folder",
+         "a file attached to the chat", "isn't there, stop", "download link",
+         "document number and revision", "save it in that folder",
+         "Never read a data sheet through the web"],
+        ["from a project document instead of the data sheet",
+         "don't use it on your own", "ask the user", "If they agree",
+         "second-hand", "the document, and the data sheet it came from"],
+        ["No estimates", "solving trial values through `solve_div`",
+         "never from a hand or rough estimate"],
+        ["A trial with placeholder values", "labeled as a what-if in the report",
+         "names every placeholder", "never written into the .div"],
+    ], ids=["data sheets", "values from other documents", "no estimates", "what-ifs"])
+    def test_data_sheet_and_sourcing_rules_are_stated(self, wording):
+        """The rules from the first live test, each in one bullet of Rules."""
+        rules = text_of(SKILL_MD).split("\n## Rules\n")[1].split("\n## ")[0]
+        bullets = [b for b in rules.split("\n- ") if wording[0] in b]
+        assert len(bullets) == 1, wording[0]
+        for phrase in wording:
+            assert phrase in bullets[0], phrase
+
+    def test_requirements_ask_for_the_data_sheet_folder_and_the_report_has_what_ifs(self):
+        text = text_of(SKILL_MD)
+        requirements = text.split("1. **Requirements.**")[1].split("\n2. **MCU.**")[0]
+        assert "the folder that holds the board's data sheets" in requirements
+        template = text.split("\n## Report template\n")[1]
+        assert template.index("\n    What-ifs\n") < template.index("\n    Needs input\n")
+        assert "WHAT-IF: " in template and "every placeholder" in template
+
     def test_names_no_part_vendor_or_data_sheet(self):
         """Part-agnostic, as the code is (the same patterns)."""
         found = [f"SKILL.md:{number}: {pattern} in {line.strip()!r}"

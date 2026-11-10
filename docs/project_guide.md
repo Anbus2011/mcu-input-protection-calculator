@@ -1,6 +1,6 @@
 # Project guide
 
-What this project is for, what the planned Claude skill will do, and the workflow from requirements to an approved input design.
+What this project is for, what the Claude skill does, and the workflow from requirements to an approved input design.
 
 | Document | What it covers |
 |---|---|
@@ -48,7 +48,11 @@ What this project is for, what the planned Claude skill will do, and the workflo
 **Rules:**
 - The solver does all the math, through the server. Chat never retypes a number: tables are shown as `solve_div` returned them and plots as `plot_div` drew them.
 - Nothing is guessed. A value the skill can't source is written as `null` and shows as "needs input".
+- Before reading any MCU or diode value, the skill asks the user which folder holds the board's data sheets (once per board, saved with the requirements). It reads data sheets only from the user's copy in that folder or from a file attached to the chat. If the data sheet it needs isn't there, it stops: it gives the user a download link to the manufacturer's data sheet (document number and revision) and asks them to save it in that folder. It never reads a data sheet through the web.
 - Every data-sheet value is cited in `source` and `note` (document number, revision, table or figure), and the section is written with `checked: false`.
+- If a value is available from a project document instead of the data sheet (for example curve readings or MCU limits recorded earlier), the skill doesn't use it on its own. It asks the user. If they agree, it cites the value as second-hand: the document, and the data sheet it came from.
+- No estimates. A number the skill wants (for example the R1 needed for a check to pass) comes from solving trial values through `solve_div`, never from a hand or rough estimate.
+- A trial with placeholder values is labeled as a what-if in the report, names every placeholder, and is never written into the `.div`.
 - Before designing, the skill solves both example files through `solve_div` and stops if the results differ from their stored results. It uses its own copies in `skill/examples/`; a test fails if they differ from `examples/`. It compares the results with code when code execution is available, not by eye. If it can't read its `examples/` folder, it stops and says so.
 - The skill has its own version number and states the `SOLVER_VERSION` it was written and tested for. If the server reports a different `SOLVER_VERSION`, the skill stops and says the skill may need updating. Every `.div` carries `SOLVER_VERSION` in its `results`, and the skill writes its own version, the solver version and the server's commit in the file's `notes` and in its report (format 2.0 has no key for them).
 - When `solver_info` reports `dirty: true`, the skill continues. It writes "server dirty: true" with the commit in the file's `notes`, and flags it at the top of its report.
