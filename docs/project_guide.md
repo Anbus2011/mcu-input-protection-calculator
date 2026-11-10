@@ -29,7 +29,7 @@ What this project is for, what the planned Claude skill will do, and the workflo
 The skill is not built yet. It will be a Claude skill that designs the protection network for one input and writes its `.div`.
 
 **In the skill (deterministic):**
-- the solver and `divcheck.py`, copied from this repository, with the commit and `SOLVER_VERSION` recorded;
+- the solver, reached through an MCP server that lives in `skill/` in this repository. The server imports `src/models/clamp_solver.py` and `src/core/div_format.py` directly, so the repository holds the only copy of the solver. Its tools take the contents of a `.div` (not a file path, so the server can run on another machine), validate and solve it, return the file with `results` filled in and draw the plot. Every call also returns `SOLVER_VERSION` and the commit the server is running. `skill/` also holds the skill's `SKILL.md`. That folder is the master copy: changes are made there, never in the copy installed in Claude;
 - a value search over E96 R1/R2 pairs, ranked by a fixed rule;
 - the resistor specification: value, tolerance, power rating after derating to the check temperature, and working voltage;
 - the `.div` writer and the report template.
@@ -46,14 +46,14 @@ The skill is not built yet. It will be a Claude skill that designs the protectio
 - Nothing is guessed. A value the skill can't source is written as `null` and shows as "needs input".
 - Every data-sheet value is cited in `source` and `note` (document number, revision, table or figure), and the section is written with `checked: false`.
 - Before designing, the skill runs `divcheck.py` on both files in `examples/` and stops if the results differ from the stored ones.
-- Every output is stamped with `SOLVER_VERSION` and the repository commit.
+- The skill has its own version number and states the `SOLVER_VERSION` it was written and tested for. If the server reports a different `SOLVER_VERSION`, the skill stops and says the skill may need updating. Every `.div` carries `SOLVER_VERSION` in its `results`, and the skill writes its own version, the solver version and the server's commit in the file's `notes` and in its report (format 2.0 has no key for them).
 - A check the solver doesn't make (for example resistor derating at temperature, or the board's minimum rail load) is reported as done by the skill or as not checked, never as PASS.
 - `rating_mw` in the `.div` is the data-sheet rating as stated. Derating to the check temperature is the skill's own check, in its report.
 
 ## 3. The workflow
 
 1. **Requirements.** The user gives them through the skill:
-   - survival voltage (`v_input_max`), touch voltage (`v_touch`) and the most negative input (`v_input_min`);
+   - the highest continuous input voltage (`v_input_max`: the board must survive it, and the Safe Max check runs at it), the touch voltage (`v_touch`) and the most negative input (`v_input_min`);
    - the logic sources' levels;
    - the required frequency;
    - analog full scale and allowed error;
@@ -77,6 +77,5 @@ The skill is not built yet. It will be a Claude skill that designs the protectio
 
 ## 5. Next work
 
-1. Push `main` to GitHub.
-2. The first real design: the user inputs of a dual-channel motor controller. Its requirements are kept with that board's project, not in this repository.
-3. Build the skill.
+1. Build the skill in `skill/`: the MCP server, its tests (both files in `examples/` solved through the server's tools give their stored results), and `SKILL.md`. Then test the installed skill live in a Claude chat.
+2. The first real design, made with the skill: the user inputs of a dual-channel motor controller. Its requirements are kept with that board's project, not in this repository.

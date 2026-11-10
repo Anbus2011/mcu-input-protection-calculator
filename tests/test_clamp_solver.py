@@ -50,7 +50,7 @@ def table_voltage(rows, column, amps):
     raise AssertionError("current outside the table")
 
 
-# ── Reference numbers (docs/session2_prompt.md) ──────────────────────────────
+# ── Reference numbers (CLAUDE.md, Verification Baseline) ─────────────────────
 
 class TestReferenceNumbers:
     @pytest.mark.parametrize("design,typ,low,high", [
@@ -78,8 +78,8 @@ class TestReferenceNumbers:
             ("2.156", "2.007", "2.334"), ("3.106", "2.926", "3.326")]
 
     def test_original_table_with_the_original_offsets(self):
-        """With typical -/+ 0.2 V in every row the solver gives the table as
-        docs/session2_prompt.md first had it, to the millivolt."""
+        """With typical -/+ 0.2 V in every row, instead of the Table 8 offsets,
+        the solver gives this table, to the millivolt."""
         rows = [dict(r, v_min=round(r["v_typ"] - 0.2, 3), v_max=round(r["v_typ"] + 0.2, 3))
                 for r in zener_reference()["clamp_diode"]["reverse"]]
         got = [solve(change(d, clamp_diode__reverse=rows))["voltages"]["levels"]["max_input"]
