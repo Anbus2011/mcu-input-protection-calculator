@@ -127,7 +127,7 @@ What each file covers:
 * `test_frequency.py`: the time constant, the two edge times, the two frequency limits.
 * `test_div_format.py`: the file format: the two example files and their stored results, every format and value problem, atomic write.
 * `test_divcheck.py`: the checker: summary, output files, the same `results` as the app's Save, exit codes, no GUI packages.
-* `test_mcp_server.py`: the MCP server: the same results, file text, summary and problems as `divcheck.py`, the copies in `skill/examples/`, `solver_info` (commit and `dirty`), the PNG and its curves against `AppState`'s sweep, no customtkinter, a client round trip in process, over stdio and over HTTP.
+* `test_mcp_server.py`: the MCP server: the same results, file text, summary and problems as `divcheck.py`, the copies in `skill/examples/`, the commit and `dirty` in every answer, the PNG and its curves against `AppState`'s sweep, no customtkinter, a client round trip in process, over stdio and over HTTP.
 * `test_file_io.py`: save and load round trip, other files refused, dirty tracking.
 * `test_app_state.py`: `AppState`: parsing, "needs input", range checks, the table states, loading and saving, open + save, "checked", the plot sweep.
 * `test_ui.py`: drives the real, withdrawn window through its widgets: every input, panel and tab, the tooltips, the plot. Three layout tests show the window at 1400×900 and are skipped on a screen it does not fit.

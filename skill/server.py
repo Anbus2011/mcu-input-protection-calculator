@@ -17,7 +17,8 @@ divcheck.py prints and writes for the same file. The plot is the app's sweep
 
 Every tool is read-only and takes the .div as JSON text, never a file path,
 so the server can run on another machine. Every answer carries
-SOLVER_VERSION and the commit the server is running.
+SOLVER_VERSION, the commit the server is running and "dirty" (whether the
+server's folder had uncommitted changes when it started).
 
 Must not import customtkinter, directly or through another module.
 """
@@ -104,8 +105,10 @@ def _dirty() -> tuple:
 
 
 def _stamp() -> dict:
-    """What every answer carries: the solver version and the commit."""
-    return {"solver_version": SOLVER_VERSION, "commit": _commit()[0]}
+    """What every answer carries: the solver version, the commit and whether
+    the folder had uncommitted changes on top of it."""
+    return {"solver_version": SOLVER_VERSION, "commit": _commit()[0],
+            "dirty": _dirty()[0]}
 
 
 # ── divcheck's path, on text instead of a file ───────────────────────────────
@@ -171,8 +174,9 @@ def solve_div(div_json: str, name: str = SUMMARY_NAME) -> dict[str, Any]:
       save as it is (null when invalid). The inputs are returned as sent.
     - summary: a plain-text summary: verdict, checks, information rows, pin
       voltages, inputs still needed (null when invalid).
-    - solver_version, commit: what solved it (commit is null when git can't
-      give it; solver_info says why).
+    - solver_version, commit, dirty: what solved it. dirty is true when the
+      server's folder had uncommitted changes when it started. commit and
+      dirty are null when git can't give them; solver_info says why.
 
     A valid file is solved whatever its statuses: read the verdict and the
     checks in results. Blank inputs give "needs input", not a problem.
@@ -223,7 +227,7 @@ def plot_div(div_json: str) -> CallToolResult:
       there is no image.
     - unsettled_points: plot points where the solver did not settle; the
       curve is not reliable there (0 normally; null when invalid).
-    - solver_version, commit.
+    - solver_version, commit, dirty: as for solve_div.
     """
     plot = _plot(div_json)
     png = plot.pop("png")

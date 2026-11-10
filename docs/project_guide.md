@@ -29,7 +29,7 @@ What this project is for, what the planned Claude skill will do, and the workflo
 The skill is not built yet. It will be a Claude skill that designs the protection network for one input and writes its `.div`.
 
 **Deterministic, through the MCP server:**
-- the solver, reached through an MCP server that lives in `skill/` in this repository. The server imports `src/models/clamp_solver.py` and `src/core/div_format.py` directly, so the repository holds the only copy of the solver. Its tools take the contents of a `.div` (not a file path, so the server can run on another machine), validate and solve it, return the file with `results` filled in and draw the plot. Every call also returns `SOLVER_VERSION` and the commit the server is running. The server does no math of its own, chooses no values and reads or writes no files.
+- the solver, reached through an MCP server that lives in `skill/` in this repository. The server imports `src/models/clamp_solver.py` and `src/core/div_format.py` directly, so the repository holds the only copy of the solver. Its tools take the contents of a `.div` (not a file path, so the server can run on another machine), validate and solve it, return the file with `results` filled in and draw the plot. Every call also returns `SOLVER_VERSION`, the commit the server is running and `dirty` (true when the server's folder had uncommitted changes when it started). The server does no math of its own, chooses no values and reads or writes no files.
 
 **Fixed rules, in `SKILL.md`** (`skill/SKILL.md` is the master copy: changes are made there, never in the copy installed in Claude):
 - the workflow below and the check list;
@@ -51,6 +51,7 @@ The skill is not built yet. It will be a Claude skill that designs the protectio
 - Every data-sheet value is cited in `source` and `note` (document number, revision, table or figure), and the section is written with `checked: false`.
 - Before designing, the skill solves both example files through `solve_div` and stops if the results differ from their stored results. It uses its own copies in `skill/examples/`; a test fails if they differ from `examples/`.
 - The skill has its own version number and states the `SOLVER_VERSION` it was written and tested for. If the server reports a different `SOLVER_VERSION`, the skill stops and says the skill may need updating. Every `.div` carries `SOLVER_VERSION` in its `results`, and the skill writes its own version, the solver version and the server's commit in the file's `notes` and in its report (format 2.0 has no key for them).
+- When `solver_info` reports `dirty: true`, the skill continues. It writes "server dirty: true" with the commit in the file's `notes`, and flags it at the top of its report.
 - A check the solver doesn't make (for example resistor derating at temperature, or the board's minimum rail load) is reported as done by the skill or as not checked, never as PASS.
 - `rating_mw` in the `.div` is the data-sheet rating as stated. Derating to the check temperature is the skill's own check, in its report.
 

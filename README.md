@@ -365,11 +365,11 @@ The summary tells a blank diode table from one that is not modelled: "Forward ta
 
 | Tool | What it returns |
 |------|-----------------|
-| `solver_info` | The solver version, the `.div` format version, the git commit the server is running, and `dirty`: whether its folder had uncommitted changes when it started |
+| `solver_info` | The solver version, the `.div` format version, the git commit the server is running, and `dirty`: whether its folder had uncommitted changes when it started (with the reason when git can't give the commit or `dirty`) |
 | `solve_div` | Whether the file is valid, every problem as `key.path: message`, the file's text with `results` filled in, and the summary `divcheck.py` prints |
 | `plot_div` | A PNG of pin voltage against input voltage: typical, lowest and highest of the eight corners, with VIL, VIH and the pin limits. It is the same sweep as the app's plot |
 
-All three are read-only and take the `.div` as JSON text, not a file path, so the server can run on another machine. An invalid file is a normal answer (`valid` false and the problems), not an error. Every answer carries the solver version and the commit.
+All three are read-only and take the `.div` as JSON text, not a file path, so the server can run on another machine. An invalid file is a normal answer (`valid` false and the problems), not an error. Every answer carries the solver version, the commit and `dirty`.
 
 The server needs the `mcp` package (in `requirements.txt`; Python 3.10 or newer, `mcp` 1.x) and `matplotlib` for the plot. It does not use `customtkinter`.
 

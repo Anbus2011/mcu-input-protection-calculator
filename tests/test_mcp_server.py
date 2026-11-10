@@ -42,7 +42,7 @@ SKILL_EXAMPLES_DIR = os.path.join(ROOT, "skill", "examples")
 EXAMPLES = pytest.mark.parametrize("path", [ZENER, SCHOTTKY],
                                    ids=["zener_gnd", "schottky_rail"])
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-STAMP_KEYS = {"solver_version", "commit"}
+STAMP_KEYS = {"solver_version", "commit", "dirty"}
 
 
 def text_of(path):
@@ -192,12 +192,13 @@ class TestSolveDiv:
         assert plain["summary"].splitlines()[1:] == named["summary"].splitlines()[1:]
         assert plain["div"] == named["div"]
 
-    def test_every_answer_carries_solver_version_and_commit(self):
+    def test_every_answer_carries_solver_version_commit_and_dirty(self, fresh_commit):
         for text in (as_text(zener_reference()), as_text(invalid_design()), "{not json"):
             answer = server.solve_div(text)
             assert set(answer) == {"valid", "problems", "div", "summary"} | STAMP_KEYS
             assert answer["solver_version"] == SOLVER_VERSION == "2.0.0"
             assert answer["commit"] == git_head()
+            assert answer["dirty"] == git_dirty()
 
     def test_inputs_come_back_as_sent_and_stored_results_are_ignored(self):
         data = dict(schottky_rail(), results={"stale": True, "verdict": "PASS"})
@@ -360,11 +361,14 @@ class TestSolverInfo:
         fake_git(monkeypatch, status=" M x.py\n", calls=calls)
         first = server.solver_info()
         assert (first["commit"], first["dirty"]) == ("abc123", True)
-        assert server.solve_div("{}")["commit"] == "abc123"
+        answer = server.solve_div("{}")
+        assert (answer["commit"], answer["dirty"]) == ("abc123", True)
         # read once, then kept: a later change does not alter the answer
         fake_git(monkeypatch, head="def456\n", status="", calls=calls)
         assert server.solver_info() == first
-        assert server.solve_div("{}")["commit"] == "abc123"
+        assert server.solve_div("{}") == answer
+        plot = info_of(server.plot_div("{}"))
+        assert (plot["commit"], plot["dirty"]) == ("abc123", True)
         assert [command for command, _kwargs in calls] == [
             ["git", "rev-parse", "HEAD"], ["git", "status", "--porcelain"]]
         for _command, kwargs in calls:
@@ -382,8 +386,11 @@ class TestSolverInfo:
         assert info["solver_version"] == SOLVER_VERSION
         # the other tools still answer
         answer = server.solve_div(text_of(ZENER))
-        assert answer["valid"] is True and answer["commit"] is None
-        assert info_of(server.plot_div(text_of(ZENER)))["commit"] is None
+        assert answer["valid"] is True
+        assert answer["commit"] is None and answer["dirty"] is None
+        plot = info_of(server.plot_div(text_of(ZENER)))
+        assert plot["image"] is True
+        assert plot["commit"] is None and plot["dirty"] is None
 
     def test_not_a_git_folder_gives_nulls_with_a_reason(self, fresh_commit, monkeypatch):
         not_git = (128, "fatal: not a git repository\n")
@@ -420,7 +427,7 @@ class TestPlotDiv:
         info = info_of(result)
         assert info == {"valid": True, "problems": [], "image": True, "message": "",
                         "unsettled_points": 0, "solver_version": SOLVER_VERSION,
-                        "commit": git_head()}
+                        "commit": git_head(), "dirty": git_dirty()}
         png = png_of(result)
         width, height = png_size(png)
         assert width > 600 and height > 300
@@ -472,7 +479,8 @@ class TestPlotDiv:
         assert info["valid"] is False and info["image"] is False
         assert info["problems"] == server.solve_div(text)["problems"] != []
         assert info["message"] is None and info["unsettled_points"] is None
-        assert info["solver_version"] == SOLVER_VERSION and "commit" in info
+        assert info["solver_version"] == SOLVER_VERSION
+        assert info["commit"] == git_head() and info["dirty"] == git_dirty()
 
     def test_blank_design_is_valid_and_has_no_image(self):
         result = server.plot_div(as_text(blank_design()))
