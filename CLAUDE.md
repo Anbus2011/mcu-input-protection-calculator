@@ -7,6 +7,8 @@ A design lives in a `.div` file (format 2.0, `docs/div_v2_format.md`). A Claude 
 
 When writing or modifying code for this project, you must adhere strictly to the architectural rules and mathematical models defined in this document.
 
+**Repository files.** `docs/session2_prompt.md` is a historical brief (the one the `div-v2` work was done from, superseded in part). It is a record, not instructions. `docs/bzb984_fig7_typical.json` and `docs/bat54cv_fig1_fig2_typical.json` are readings of data-sheet graphs, which the tables of the two example files come from. The tests read `bzb984_fig7_typical.json` (`test_clamp_solver.py`), so don't move or delete these files.
+
 ## 2. Architecture & State Management
 This project uses a strict Controller/Model/View decoupled architecture.
 * **`src/models/clamp_solver.py`**: The one solver. Python standard library only (no numpy), **no UI imports**: the skill calls it under a plain Python install. `solve(design)` takes the design as a dict (the layout of a `.div` file) and returns the results as a dict. `prepare(design).pin_voltage(v_in, case)` is the pin-voltage function for sweeps.
@@ -51,6 +53,7 @@ The diode is described by measured points from its data sheet, not by a diode ty
 * **Equation:** the current through R1 equals the current through R2 plus the diode current: $\frac{V_{in} - V}{R1} - \frac{V}{R2} - I_{diode}(V) = 0$. The pin draws no current. The VDD rail is fixed at the MCU's VDD value.
 * **Method:** bisection on the node voltage, on the bracket from the lowest to the highest of $V_{in}$, 0 and the voltage of the diode's other terminal, until the bracket is 1 nV wide (`SOLVER_TOLERANCE_V = 1e-9`). The left side falls strictly as V rises, so there is one root. If the bracket has no sign change (or doesn't narrow), the result is marked "did not settle" and a warning is shown.
 * **One function** (`_solve_node`) serves the results, the input levels and the plot.
+* `_LN_CURRENT_MAX = 690` caps ln(current) in an extended segment so that `exp()` cannot overflow. It has no effect at any physical current (e^690 A) and is not a model parameter.
 * **The solved pin voltage never falls as the input voltage rises** (tested for each wiring).
 
 ### C. Typical and Worst Case
@@ -105,7 +108,7 @@ The question the tab answers: what input frequency can a pin with this divider a
 * Format 2.0 is described in `docs/div_v2_format.md`; keep that file in step with any change. Every key must be present (`null` for blank), unknown keys are errors, numbers are JSON numbers.
 * `results` is written only by the solver: `solver_version` (the constant `SOLVER_VERSION`, not a git hash), the verdict, the checks (id, status, value, limit, unit), information rows, the key voltages, inputs still needed, notes and warnings. The app ignores stored results when it opens a file and solves again. **Bump `SOLVER_VERSION` when a change alters any result.**
 * There is no format 1.0 converter. A 1.0 file gets one clear message.
-* The loader reports every problem, each with its key path. Format problems (wrong type, missing or unknown key) stop a file from opening. Value problems (out of range, table rows out of order) open in the app and are listed under "Fix:"; `divcheck.py` rejects the file for either kind.
+* The loader reports every problem, each with its key path. Format problems (a wrong type, a missing or unknown key, or a unit, an anode/cathode terminal or a diode type that is not one of the allowed values) stop a file from opening. Value problems (out of range, table rows out of order) open in the app and are listed under "Fix:"; `divcheck.py` rejects the file for either kind.
 * `python divcheck.py in.div [out.div] [--json out.json]`: exit 0 valid and solved (whatever the statuses), 1 invalid with every problem listed, 2 a file could not be read or written.
 * `examples/` holds two fixtures: `zener_gnd_bzb984_c3v3.div` and `schottky_rail_bat54cv.div`. Their stored results are tested against the solver; regenerate with `python divcheck.py examples/x.div examples/x.div`.
 
@@ -117,6 +120,8 @@ python -m pytest tests/ -v
 ```
 
 All 820 tests must pass. The UI tests carry the pytest marker `ui` (registered in `pytest.ini`); they need a desktop session and take a little over three minutes. While working, `python -m pytest tests/ -m "not ui"` runs the other 601 in about 35 seconds. Run the whole suite before committing.
+
+The non-UI tests still need the packages in `requirements.txt` installed: pytest imports `tests/test_ui.py` to collect it even when its tests are deselected, and one non-UI test (`test_plot_is_not_numpy` in `test_app_state.py`) imports the plot module. Only the UI tests also need a desktop session.
 
 The suite covers:
 * **Solver** (`test_clamp_solver.py`, 190 tests): reference numbers, the Schottky-to-rail hand check, the three wirings (plus the fourth), pin voltage never falls as the input rises, `type` is only a label, diode tables (interpolation, extension, rules), bisection to 1 nV, "did not settle", "needs input" with the rest still computed, R_s rules, every check and its thresholds, information rows, the overall verdict, standard library only
@@ -148,4 +153,4 @@ By hand: at 3.02 V the diode current is (30 − 3.02) / 10 kΩ − 3.02 / 18 kΩ
 
 The same diode with R1 8.2 kΩ, R2 29 kΩ (typical / lowest / highest): 1.928 / 1.803 / 2.065 V at 3.0 V in, 2.156 / 2.007 / 2.334 V at 4.1 V, 3.106 / 2.926 / 3.326 V at 30 V.
 
-Schottky to the rail (`examples/schottky_rail_bat54cv.div`, BAT54CV, same divider, 30 V): with the maximum column and nominal resistors 2.44 mA, 0.351 V across the diode, 3.651 V at the pin.
+Schottky to the rail (`examples/schottky_rail_bat54cv.div`, BAT54CV, same divider, 30 V): with the maximum column and nominal resistors 2.43 mA (the solver gives 2.432 mA), 0.351 V across the diode, 3.651 V at the pin.

@@ -54,8 +54,9 @@ V_input ── R1 ──┬── R_series ──> MCU GPIO Pin
 | `matplotlib` | Embedded plotting (V_mcu vs V_input chart) |
 | `numpy` | Required by matplotlib |
 | `pillow` | Image processing support |
+| `pytest` | Running the test suite |
 
-The solver and `divcheck.py` need none of these: a plain Python install is enough.
+The solver and `divcheck.py` need none of these: a plain Python install is enough. The test suite needs all of them installed, the tests that don't open a window included: one non-UI test imports the plot module, and pytest imports `tests/test_ui.py` to collect it even when its tests are deselected. Only the UI tests also need a desktop session.
 
 ---
 
@@ -64,8 +65,8 @@ The solver and `divcheck.py` need none of these: a plain Python install is enoug
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/Resistor_Calculator.git
-cd Resistor_Calculator
+git clone https://github.com/Anbus2011/mcu-input-protection-calculator.git
+cd mcu-input-protection-calculator
 ```
 
 ### 2. (Optional) Create a virtual environment
@@ -271,7 +272,7 @@ Answers one question: what input frequency can this pin handle, for uses such as
 
 - **May work up to** = 1 / (2 × (edge time + minimum pulse width))
 - **Reliable up to** = "may work up to" ÷ margin factor
-- **Required** (when a required frequency is given in the System panel): PASS at or below "reliable", TIGHT between the two, FAIL above "may work"
+- **Required** (when a required frequency is given in the System panel): PASS at or below "reliable", TIGHT between the two, FAIL above "may work". It is also FAIL when the pin never reads high or low
 - **Details** opens the values behind the numbers: time constant, total capacitance, the two edge times and the shortest usable pulse
 
 How the edge time is found:
@@ -352,10 +353,17 @@ mcu_input_calculator/
 ├── main.py                       # Application entry point
 ├── divcheck.py                   # Command-line checker for .div files
 ├── requirements.txt              # Python dependencies
+├── pytest.ini                    # Registers the "ui" test marker
 ├── README.md
+├── CLAUDE.md                     # Rules for AI assistants working on the code
+├── LICENSE                       # MIT
 │
 ├── docs/
-│   └── div_v2_format.md          # The .div format 2.0
+│   ├── div_v2_format.md          # The .div format 2.0
+│   ├── test_changes.md           # Tests removed or rewritten since the 401-test suite, with reasons
+│   ├── session2_prompt.md        # Historical brief, superseded in part, kept as a record
+│   ├── bzb984_fig7_typical.json  # Graph readings behind the Zener example's table (read by the tests)
+│   └── bat54cv_fig1_fig2_typical.json   # Graph readings behind the Schottky example's tables
 ├── examples/                     # Two example designs (format 2.0)
 │
 ├── src/
@@ -374,10 +382,14 @@ mcu_input_calculator/
 │       └── plot_canvas.py        # Matplotlib V_mcu vs V_input chart
 │
 ├── tests/                        # pytest suite (python -m pytest tests/ -v)
+│   ├── designs.py                # Shared test designs
+│   └── test_*.py                 # The tests
 │
 └── .vscode/
     └── launch.json               # VS Code debug configuration
 ```
+
+`datasheets/` (data-sheet PDFs) and `docs/screenshots/` are local only: they are listed in `.gitignore` and are not in git.
 
 ### Architecture
 
