@@ -1,708 +1,795 @@
 """
-Input panel classes for the Divider Calculator.
-Each panel owns its CTk widgets and pushes values into AppState on change.
+Input panel classes for the MCU Input Protection Calculator.
+
+Each panel owns its CTk widgets. Every input is bound to a Tk variable whose
+write trace forwards the raw text to AppState.set_field (or set_cell for the
+clamp-diode tables), so typing, paste, cut, delete, selection and
+programmatic changes are all seen. Panels never parse or calculate; AppState
+does. sync_from_state() copies AppState's text back into the widgets after
+AppState changed it (load, new, fill, table rows, an unticked "checked" box).
+
+The Clamp Diode, MCU and System panels share one grid: a fixed label column,
+a field column, a unit column and a "?" column (with the slack between the
+unit and the "?"), so every row lines up. The Resistors panel has the same
+label column, field column and "?" column; between them each resistor has
+its unit, rating and tolerance, named by a header row.
 """
 from __future__ import annotations
+
+import tkinter as tk
 
 import customtkinter as ctk
 from typing import TYPE_CHECKING
 
-from src.core.constants import ZENER_PRESETS
-from src.models.bandwidth_model import BandwidthParams
+from src.core.app_state import BLANK, NOT_MODELLED, ROWS
+from src.core.constants import RESISTOR_UNITS
+from src.core.div_format import DIODE_TYPES
+from src.models.clamp_solver import ROW_KEYS, TERMINALS
 
 if TYPE_CHECKING:
     from src.core.app_state import AppState
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _safe_float(entry: ctk.CTkEntry, default):
-    """Get float from entry, returning *default* on empty/invalid input."""
-    try:
-        val = entry.get().strip()
-        if not val:
-            return default
-        return float(val)
-    except (ValueError, TypeError):
-        return default
-
-
-def _set_entry(entry: ctk.CTkEntry, value):
-    """Clear and set an entry's text."""
-    entry.delete(0, "end")
-    entry.insert(0, str(value) if value is not None else "")
-
-
-# ── Resistor Panel ────────────────────────────────────────────────────────────
-
-class ResistorPanel(ctk.CTkFrame):
-    def __init__(self, parent, state: AppState):
-        super().__init__(parent)
-        self.app_state = state
-        self._build()
-
-    def _build(self):
-        ctk.CTkLabel(self, text="Resistors", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
-
-        # R1
-        r1f = ctk.CTkFrame(self, fg_color="transparent")
-        r1f.pack(fill="x", padx=10, pady=2)
-        ctk.CTkLabel(r1f, text="R1:", width=40).pack(side="left")
-        self.r1_value = ctk.CTkEntry(r1f, width=80)
-        self.r1_value.pack(side="left", padx=2)
-        self.r1_value.bind("<KeyRelease>", self._on_change)
-        self.r1_unit = ctk.CTkComboBox(r1f, values=["\u03a9", "k\u03a9"], width=70,
-                                        command=self._on_change)
-        self.r1_unit.pack(side="left", padx=2)
-        self.r1_unit.set("k\u03a9")
-        ctk.CTkLabel(r1f, text="Rating:").pack(side="left", padx=(10, 2))
-        self.r1_rating = ctk.CTkEntry(r1f, width=60)
-        self.r1_rating.pack(side="left", padx=2)
-        ctk.CTkLabel(r1f, text="mW").pack(side="left")
-        ctk.CTkLabel(r1f, text="Tol:").pack(side="left", padx=(10, 2))
-        self.r1_tol = ctk.CTkEntry(r1f, width=40)
-        self.r1_tol.pack(side="left", padx=2)
-        self.r1_tol.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(r1f, text="%").pack(side="left")
-
-        # R2
-        r2f = ctk.CTkFrame(self, fg_color="transparent")
-        r2f.pack(fill="x", padx=10, pady=2)
-        ctk.CTkLabel(r2f, text="R2:", width=40).pack(side="left")
-        self.r2_value = ctk.CTkEntry(r2f, width=80)
-        self.r2_value.pack(side="left", padx=2)
-        self.r2_value.bind("<KeyRelease>", self._on_change)
-        self.r2_unit = ctk.CTkComboBox(r2f, values=["\u03a9", "k\u03a9"], width=70,
-                                        command=self._on_change)
-        self.r2_unit.pack(side="left", padx=2)
-        self.r2_unit.set("k\u03a9")
-        ctk.CTkLabel(r2f, text="Rating:").pack(side="left", padx=(10, 2))
-        self.r2_rating = ctk.CTkEntry(r2f, width=60)
-        self.r2_rating.pack(side="left", padx=2)
-        ctk.CTkLabel(r2f, text="mW").pack(side="left")
-        ctk.CTkLabel(r2f, text="Tol:").pack(side="left", padx=(10, 2))
-        self.r2_tol = ctk.CTkEntry(r2f, width=40)
-        self.r2_tol.pack(side="left", padx=2)
-        self.r2_tol.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(r2f, text="%").pack(side="left")
-
-        # R_series
-        rsf = ctk.CTkFrame(self, fg_color="transparent")
-        rsf.pack(fill="x", padx=10, pady=2)
-        ctk.CTkLabel(rsf, text="R_s:", width=40).pack(side="left")
-        self.rs_value = ctk.CTkEntry(rsf, width=80)
-        self.rs_value.pack(side="left", padx=2)
-        self.rs_value.bind("<KeyRelease>", self._on_change)
-        self.rs_unit = ctk.CTkComboBox(rsf, values=["\u03a9", "k\u03a9"], width=70,
-                                        command=self._on_change)
-        self.rs_unit.pack(side="left", padx=2)
-        self.rs_unit.set("\u03a9")
-        ctk.CTkLabel(rsf, text="Rating:").pack(side="left", padx=(10, 2))
-        self.rs_rating = ctk.CTkEntry(rsf, width=60)
-        self.rs_rating.pack(side="left", padx=2)
-        ctk.CTkLabel(rsf, text="mW").pack(side="left")
-        ctk.CTkLabel(rsf, text="Tol:").pack(side="left", padx=(10, 2))
-        self.rs_tol = ctk.CTkEntry(rsf, width=40)
-        self.rs_tol.pack(side="left", padx=2)
-        ctk.CTkLabel(rsf, text="%").pack(side="left")
-
-    def _resistance_ohms(self, entry, combo):
-        v = _safe_float(entry, 0)
-        if combo.get() == "k\u03a9":
-            v *= 1000
-        return v
-
-    def push_to_state(self):
-        s = self.app_state
-        s.resistors.r1_ohms = self._resistance_ohms(self.r1_value, self.r1_unit)
-        s.resistors.r2_ohms = self._resistance_ohms(self.r2_value, self.r2_unit)
-        s.resistors.rs_ohms = self._resistance_ohms(self.rs_value, self.rs_unit)
-        s.resistors.r1_rating_mw = _safe_float(self.r1_rating, None)
-        s.resistors.r2_rating_mw = _safe_float(self.r2_rating, None)
-        s.resistors.r1_tol_pct = _safe_float(self.r1_tol, 1)
-        s.resistors.r2_tol_pct = _safe_float(self.r2_tol, 1)
-        # Display values for serialisation
-        s.r1_display_value = _safe_float(self.r1_value, 10)
-        s.r1_display_unit = self.r1_unit.get()
-        s.r2_display_value = _safe_float(self.r2_value, 18)
-        s.r2_display_unit = self.r2_unit.get()
-        s.rs_display_value = _safe_float(self.rs_value, 0)
-        s.rs_display_unit = self.rs_unit.get()
-        s.rs_rating_mw = _safe_float(self.rs_rating, None)
-        s.rs_tol_pct = _safe_float(self.rs_tol, None)
-
-    def load_from_data(self, data: dict):
-        r = data.get("resistors", {})
-        r1 = r.get("r1", {})
-        _set_entry(self.r1_value, r1.get("value", 10))
-        self.r1_unit.set(r1.get("unit", "k\u03a9"))
-        _set_entry(self.r1_rating, r1.get("rating_mw", "") or "")
-        _set_entry(self.r1_tol, r1.get("tolerance_pct", 1))
-
-        r2 = r.get("r2", {})
-        _set_entry(self.r2_value, r2.get("value", 18))
-        self.r2_unit.set(r2.get("unit", "k\u03a9"))
-        _set_entry(self.r2_rating, r2.get("rating_mw", "") or "")
-        _set_entry(self.r2_tol, r2.get("tolerance_pct", 1))
-
-        rs = r.get("r_series", {})
-        _set_entry(self.rs_value, rs.get("value", 0))
-        self.rs_unit.set(rs.get("unit", "\u03a9"))
-        _set_entry(self.rs_rating, rs.get("rating_mw", "") or "")
-        _set_entry(self.rs_tol, rs.get("tolerance_pct", "") or "")
-
-    def clear_fields(self):
-        _set_entry(self.r1_value, "")
-        self.r1_unit.set("k\u03a9")
-        _set_entry(self.r1_rating, "")
-        _set_entry(self.r1_tol, "")
-
-        _set_entry(self.r2_value, "")
-        self.r2_unit.set("k\u03a9")
-        _set_entry(self.r2_rating, "")
-        _set_entry(self.r2_tol, "")
-
-        _set_entry(self.rs_value, "")
-        self.rs_unit.set("\u03a9")
-        _set_entry(self.rs_rating, "")
-        _set_entry(self.rs_tol, "")
-
-    def _on_change(self, event=None):
-        self.push_to_state()
-        self.app_state.mark_dirty()
-        self.app_state.recalculate()
-
-
-# ── Zener Panel ───────────────────────────────────────────────────────────────
-
-class ZenerPanel(ctk.CTkFrame):
-    def __init__(self, parent, state: AppState):
-        super().__init__(parent)
-        self.app_state = state
-        self._build()
-
-    def _build(self):
-        # Uniform widths
-        LBL = 70   # first label
-        ENT = 60   # entry field
-        UNT = 50   # unit label
-        LBL2 = 40  # second label on same row
-
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(header, text="Zener Diode", font=("", 14, "bold")).pack(side="left")
-
-        self.preset = ctk.CTkComboBox(
-            header, values=list(ZENER_PRESETS.keys()), width=150,
-            command=self._on_preset_change
-        )
-        self.preset.pack(side="right")
-        self.preset.set("")
-        ctk.CTkLabel(header, text="Preset:").pack(side="right", padx=5)
-
-        params = ctk.CTkFrame(self, fg_color="transparent")
-        params.pack(fill="x", padx=10, pady=5)
-
-        # Row 1: VZ nom, min, max
-        row1 = ctk.CTkFrame(params, fg_color="transparent")
-        row1.pack(fill="x", pady=2)
-        ctk.CTkLabel(row1, text="VZ nom:", width=LBL).pack(side="left")
-        self.vz_nom = ctk.CTkEntry(row1, width=ENT); self.vz_nom.pack(side="left", padx=2)
-        self.vz_nom.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row1, text="V", width=LBL2).pack(side="left")
-        ctk.CTkLabel(row1, text="min:", width=LBL2).pack(side="left")
-        self.vz_min = ctk.CTkEntry(row1, width=ENT); self.vz_min.pack(side="left", padx=2)
-        self.vz_min.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row1, text="V", width=LBL2).pack(side="left")
-        ctk.CTkLabel(row1, text="max:", width=LBL2).pack(side="left")
-        self.vz_max = ctk.CTkEntry(row1, width=ENT); self.vz_max.pack(side="left", padx=2)
-        self.vz_max.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row1, text="V", width=LBL2).pack(side="left")
-
-        # Row 2: IZT, ZZT typ/max
-        row2 = ctk.CTkFrame(params, fg_color="transparent")
-        row2.pack(fill="x", pady=2)
-        ctk.CTkLabel(row2, text="@IZT:", width=LBL).pack(side="left")
-        self.izt = ctk.CTkEntry(row2, width=ENT); self.izt.pack(side="left", padx=2)
-        self.izt.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row2, text="mA", width=LBL2).pack(side="left")
-        ctk.CTkLabel(row2, text="ZZT:", width=LBL2).pack(side="left")
-        self.zzt_typ = ctk.CTkEntry(row2, width=ENT); self.zzt_typ.pack(side="left", padx=2)
-        self.zzt_typ.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row2, text="\u03a9 typ", width=UNT).pack(side="left")
-        self.zzt_max = ctk.CTkEntry(row2, width=ENT); self.zzt_max.pack(side="left", padx=2)
-        self.zzt_max.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row2, text="\u03a9 max", width=UNT).pack(side="left")
-
-        # Row 3: IZK, ZZK typ/max
-        row3 = ctk.CTkFrame(params, fg_color="transparent")
-        row3.pack(fill="x", pady=2)
-        ctk.CTkLabel(row3, text="@IZK:", width=LBL).pack(side="left")
-        self.izk = ctk.CTkEntry(row3, width=ENT); self.izk.pack(side="left", padx=2)
-        self.izk.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row3, text="mA", width=LBL2).pack(side="left")
-        ctk.CTkLabel(row3, text="ZZK:", width=LBL2).pack(side="left")
-        self.zzk_typ = ctk.CTkEntry(row3, width=ENT); self.zzk_typ.pack(side="left", padx=2)
-        self.zzk_typ.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row3, text="\u03a9 typ", width=UNT).pack(side="left")
-        self.zzk_max = ctk.CTkEntry(row3, width=ENT); self.zzk_max.pack(side="left", padx=2)
-        self.zzk_max.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row3, text="\u03a9 max", width=UNT).pack(side="left")
-
-        # Row 4: Ptot
-        row4 = ctk.CTkFrame(params, fg_color="transparent")
-        row4.pack(fill="x", pady=2)
-        ctk.CTkLabel(row4, text="Ptot:", width=LBL).pack(side="left")
-        self.ptot = ctk.CTkEntry(row4, width=ENT); self.ptot.pack(side="left", padx=2)
-        self.ptot.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row4, text="mW", width=LBL2).pack(side="left")
-
-    def push_to_state(self):
-        z = self.app_state.zener
-        z.vz_nom = _safe_float(self.vz_nom, 3.3)
-        z.vz_min = _safe_float(self.vz_min, 3.1)
-        z.vz_max = _safe_float(self.vz_max, 3.5)
-        z.izt_ma = _safe_float(self.izt, 5)
-        z.zzt_typ = _safe_float(self.zzt_typ, 85)
-        z.zzt_max = _safe_float(self.zzt_max, 95)
-        z.zzk_typ = _safe_float(self.zzk_typ, 350)
-        z.zzk_max = _safe_float(self.zzk_max, 600)
-        z.izk_ma = _safe_float(self.izk, 1)
-        z.ptot_mw = _safe_float(self.ptot, 265)
-        self.app_state.set_zener_preset(self.preset.get())
-
-    def _load_preset_values(self):
-        name = self.preset.get()
-        if name not in ZENER_PRESETS:
-            return
-        p = ZENER_PRESETS[name]
-        _set_entry(self.vz_nom, p["vz_nom"])
-        _set_entry(self.vz_min, p["vz_min"])
-        _set_entry(self.vz_max, p["vz_max"])
-        _set_entry(self.izt, p["izt_ma"])
-        _set_entry(self.zzt_typ, p["zzt_typ"])
-        _set_entry(self.zzt_max, p["zzt_max"])
-        _set_entry(self.zzk_typ, p["zzk_typ"])
-        _set_entry(self.zzk_max, p["zzk_max"])
-        _set_entry(self.izk, p["izk_ma"])
-        _set_entry(self.ptot, p["ptot_mw"])
-
-    def load_from_data(self, data: dict):
-        z = data.get("zener", {})
-        self.preset.set(z.get("preset", "Custom"))
-        _set_entry(self.vz_nom, z.get("vz_nom", 3.3))
-        _set_entry(self.vz_min, z.get("vz_min", 3.1))
-        _set_entry(self.vz_max, z.get("vz_max", 3.5))
-        _set_entry(self.izt, z.get("izt_ma", 5))
-        _set_entry(self.zzt_typ, z.get("zzt_typ", 85))
-        _set_entry(self.zzt_max, z.get("zzt_max", 95))
-        _set_entry(self.zzk_typ, z.get("zzk_typ", 350))
-        _set_entry(self.zzk_max, z.get("zzk_max", 600))
-        _set_entry(self.izk, z.get("izk_ma", 1))
-        _set_entry(self.ptot, z.get("ptot_mw", 265))
-
-    def clear_fields(self):
-        self.preset.set("")
-        _set_entry(self.vz_nom, "")
-        _set_entry(self.vz_min, "")
-        _set_entry(self.vz_max, "")
-        _set_entry(self.izt, "")
-        _set_entry(self.zzt_typ, "")
-        _set_entry(self.zzt_max, "")
-        _set_entry(self.zzk_typ, "")
-        _set_entry(self.zzk_max, "")
-        _set_entry(self.izk, "")
-        _set_entry(self.ptot, "")
-
-    def _on_preset_change(self, choice):
-        self._load_preset_values()
-        self.push_to_state()
-        self.app_state.mark_dirty()
-        self.app_state.recalculate()
-
-    def _on_change(self, event=None):
-        self.push_to_state()
-        self.app_state.mark_dirty()
-        self.app_state.recalculate()
-
-
-# ── MCU Panel ─────────────────────────────────────────────────────────────────
-
-class McuPanel(ctk.CTkFrame):
-    def __init__(self, parent, state: AppState):
-        super().__init__(parent)
-        self.app_state = state
-        self._build()
-
-    def _build(self):
-        LBL = 110  # label width
-        ENT = 80   # entry width
-        UNT = 35   # unit width
-
-        ctk.CTkLabel(self, text="MCU Pin Input Limits", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
-        params = ctk.CTkFrame(self, fg_color="transparent")
-        params.pack(fill="x", padx=10, pady=5)
-
-        row1 = ctk.CTkFrame(params, fg_color="transparent")
-        row1.pack(fill="x", pady=2)
-        ctk.CTkLabel(row1, text="VDD/VDDA:", width=LBL).pack(side="left")
-        self.vdd = ctk.CTkEntry(row1, width=ENT); self.vdd.pack(side="left", padx=2)
-        self.vdd.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row1, text="V", width=UNT).pack(side="left")
-
-        row2 = ctk.CTkFrame(params, fg_color="transparent")
-        row2.pack(fill="x", pady=2)
-        ctk.CTkLabel(row2, text="Safe Max:", width=LBL).pack(side="left")
-        self.rec_max = ctk.CTkEntry(row2, width=ENT); self.rec_max.pack(side="left", padx=2)
-        self.rec_max.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row2, text="V", width=UNT).pack(side="left")
-
-        row3 = ctk.CTkFrame(params, fg_color="transparent")
-        row3.pack(fill="x", pady=2)
-        ctk.CTkLabel(row3, text="Abs. Max:", width=LBL).pack(side="left")
-        self.abs_max = ctk.CTkEntry(row3, width=ENT); self.abs_max.pack(side="left", padx=2)
-        self.abs_max.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row3, text="V", width=UNT).pack(side="left")
-
-        row4 = ctk.CTkFrame(params, fg_color="transparent")
-        row4.pack(fill="x", pady=2)
-        ctk.CTkLabel(row4, text="Injection Limit:", width=LBL).pack(side="left")
-        self.inj_safe = ctk.CTkEntry(row4, width=ENT); self.inj_safe.pack(side="left", padx=2)
-        self.inj_safe.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row4, text="mA", width=UNT).pack(side="left")
-
-    def push_to_state(self):
-        m = self.app_state.mcu
-        m.vdd = _safe_float(self.vdd, 3.3)
-        m.v_recommended_max = _safe_float(self.rec_max, 3.6)
-        m.v_absolute_max = _safe_float(self.abs_max, 4.0)
-        m.safe_injection_ma = _safe_float(self.inj_safe, 1.0)
-
-    def load_from_data(self, data: dict):
-        m = data.get("mcu", {})
-        _set_entry(self.vdd, m.get("vdd", 3.3))
-        _set_entry(self.rec_max, m.get("v_recommended_max", 3.6))
-        _set_entry(self.abs_max, m.get("v_absolute_max", 4.0))
-        _set_entry(self.inj_safe, m.get("safe_injection_ma", 1.0))
-
-    def clear_fields(self):
-        _set_entry(self.vdd, "")
-        _set_entry(self.rec_max, "")
-        _set_entry(self.abs_max, "")
-        _set_entry(self.inj_safe, "")
-
-    def _on_change(self, event=None):
-        self.push_to_state()
-        self.app_state.mark_dirty()
-        self.app_state.recalculate()
-
-
-# ── System Panel ──────────────────────────────────────────────────────────────
-
-class SystemPanel(ctk.CTkFrame):
-    def __init__(self, parent, state: AppState):
-        super().__init__(parent)
-        self.app_state = state
-        self._build()
-
-    def _build(self):
-        LBL = 110  # label width
-        ENT = 80   # entry width
-        UNT = 45   # unit width
-
-        ctk.CTkLabel(self, text="System Requirements", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
-        params = ctk.CTkFrame(self, fg_color="transparent")
-        params.pack(fill="x", padx=10, pady=5)
-
-        row1 = ctk.CTkFrame(params, fg_color="transparent")
-        row1.pack(fill="x", pady=2)
-        ctk.CTkLabel(row1, text="Max Input:", width=LBL).pack(side="left")
-        self.vin_max = ctk.CTkEntry(row1, width=ENT); self.vin_max.pack(side="left", padx=2)
-        self.vin_max.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row1, text="V", width=UNT).pack(side="left")
-
-        row2 = ctk.CTkFrame(params, fg_color="transparent")
-        row2.pack(fill="x", pady=2)
-        ctk.CTkLabel(row2, text="ADC Scale:", width=LBL).pack(side="left")
-        self.analog_fs = ctk.CTkEntry(row2, width=ENT); self.analog_fs.pack(side="left", padx=2)
-        self.analog_fs.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row2, text="V", width=UNT).pack(side="left")
-
-        row3 = ctk.CTkFrame(params, fg_color="transparent")
-        row3.pack(fill="x", pady=2)
-        ctk.CTkLabel(row3, text="Logic High:", width=LBL).pack(side="left")
-        self.logic_high = ctk.CTkEntry(row3, width=ENT); self.logic_high.pack(side="left", padx=2)
-        self.logic_high.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row3, text="V min", width=UNT).pack(side="left")
-
-        row4 = ctk.CTkFrame(params, fg_color="transparent")
-        row4.pack(fill="x", pady=2)
-        ctk.CTkLabel(row4, text="Logic Low:", width=LBL).pack(side="left")
-        self.logic_low = ctk.CTkEntry(row4, width=ENT); self.logic_low.pack(side="left", padx=2)
-        self.logic_low.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(row4, text="V max", width=UNT).pack(side="left")
-
-    def push_to_state(self):
-        s = self.app_state.system
-        s.v_input_max = _safe_float(self.vin_max, 30)
-        s.v_analog_fullscale = _safe_float(self.analog_fs, 5.1)
-        s.v_logic_high_min = _safe_float(self.logic_high, 3.8)
-        s.v_logic_low_max = _safe_float(self.logic_low, 1.0)
-
-    def load_from_data(self, data: dict):
-        s = data.get("system", {})
-        _set_entry(self.vin_max, s.get("v_input_max", 30))
-        _set_entry(self.analog_fs, s.get("v_analog_fullscale", 5.1))
-        _set_entry(self.logic_high, s.get("v_logic_high_min", 3.8))
-        _set_entry(self.logic_low, s.get("v_logic_low_max", 1.0))
-
-    def clear_fields(self):
-        _set_entry(self.vin_max, "")
-        _set_entry(self.analog_fs, "")
-        _set_entry(self.logic_high, "")
-        _set_entry(self.logic_low, "")
-
-    def _on_change(self, event=None):
-        self.push_to_state()
-        self.app_state.mark_dirty()
-        self.app_state.recalculate()
-
-
-# ── Notes Panel ───────────────────────────────────────────────────────────────
-
-class NotesPanel(ctk.CTkFrame):
-    def __init__(self, parent, state: AppState):
-        super().__init__(parent)
-        self.app_state = state
-        self._build()
-
-    def _build(self):
-        ctk.CTkLabel(self, text="Design Notes", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
-        self.textbox = ctk.CTkTextbox(self, height=80)
-        self.textbox.pack(fill="x", padx=10, pady=5)
-        self.textbox.bind("<KeyRelease>", self._on_change)
-
-    def push_to_state(self):
-        self.app_state.notes = self.textbox.get("1.0", "end-1c")
-
-    def load_from_data(self, data: dict):
-        self.textbox.delete("1.0", "end")
-        self.textbox.insert("1.0", data.get("notes", ""))
-
-    def clear_fields(self):
-        self.textbox.delete("1.0", "end")
-
-    def _on_change(self, event=None):
-        self.push_to_state()
-        self.app_state.mark_dirty()
-
-
-# ── Tooltip Helper ────────────────────────────────────────────────────────────
+UNIT_CHOICES = list(RESISTOR_UNITS.keys())
+NEEDS_INPUT = "needs input"
+MUTED = "gray60"
+
+# Column widths of the part panels' grid (Clamp Diode, MCU, System)
+LABEL_W, FIELD_W, UNIT_W, HELP_W = 124, 84, 46, 26
+HELP_COL = 4            # columns: label, field, unit, slack, "?"
+
+# What a clamp-diode table with no rows says, by state
+TABLE_STATE_TEXT = {
+    BLANK: "Not filled in: needs input",
+    NOT_MODELLED: "Not modelled: current taken as zero",
+    ROWS: "",
+}
+TABLE_TITLES = {
+    "forward": "Forward table (anode positive)",
+    "reverse": "Reverse table (cathode positive)",
+}
+TABLE_TIPS = {
+    "forward": "The diode with its anode more positive than its cathode.\n"
+               "Each row: a current and the voltage across the diode at that\n"
+               "current (minimum, typical, maximum). Rows in ascending current.\n"
+               "Tick \"Not modelled\" if there is no data for this direction:\n"
+               "its current is then taken as zero.",
+    "reverse": "The diode with its cathode more positive than its anode: the\n"
+               "working direction of a Zener, the leakage direction of a\n"
+               "Schottky. Voltages and currents are entered as positive numbers.\n"
+               "Tick \"Not modelled\" if there is no data for this direction:\n"
+               "its current is then taken as zero.",
+}
+OTHER_PANELS_NOTE = (
+    "The other inputs of this tab are on the left: the diode capacitance in "
+    "the Clamp Diode panel, C_pin and the minimum pulse width in the MCU "
+    "panel, the logic levels and the required frequency in the System panel.")
+
+
+# ── Tooltips ──────────────────────────────────────────────────────────────────
 
 class _Tooltip:
-    """Popup tooltip that appears near a widget on hover or click.
-    Auto-dismisses after 4 seconds or when the mouse leaves."""
+    """A tooltip for one widget.
+
+    It appears about half a second after the pointer comes onto the widget
+    (not at all if the pointer leaves first), offset from the pointer so it
+    is never under it. It goes when the pointer leaves or on a click. Only
+    one tooltip is ever shown. install_tooltip_dismissal() also hides it on
+    scroll, window focus loss and window move, and the tab view hides it on
+    a tab change.
+    """
+
+    DELAY_MS = 500
+    WATCH_MS = 200
+    OFFSET = (16, 20)
+    all_texts: list = []     # every tooltip text created (read by the UI tests)
+    instances: list = []
+    current = None           # the one tooltip that is showing, if any
 
     def __init__(self, widget: ctk.CTkBaseClass, text: str):
         self.widget = widget
         self.text = text
         self._tw = None
-        self._hide_id = None
-        widget.bind("<Enter>", self._show)
-        widget.bind("<Leave>", self._hide)
-        widget.bind("<Button-1>", self._toggle)
+        self._pending = None
+        _Tooltip.all_texts.append(text)
+        _Tooltip.instances.append(self)
+        widget.bind("<Enter>", self.on_enter, add="+")
+        widget.bind("<Leave>", self.on_leave, add="+")
+        widget.bind("<ButtonPress>", self.on_leave, add="+")
 
-    def _show(self, event=None):
-        if self._tw:
-            return
-        x = self.widget.winfo_rootx() + self.widget.winfo_width() + 5
-        y = self.widget.winfo_rooty()
-        self._tw = tw = ctk.CTkToplevel()
-        tw.wm_overrideredirect(True)
-        tw.wm_geometry(f"+{x}+{y}")
-        tw.attributes("-topmost", True)
-        # Close tooltip if user clicks anywhere on it
-        tw.bind("<Button-1>", lambda e: self._hide())
-        frame = ctk.CTkFrame(tw, corner_radius=6, border_width=1,
-                             border_color="gray50", fg_color=("gray90", "gray20"))
-        frame.pack()
-        ctk.CTkLabel(frame, text=self.text, wraplength=300, justify="left",
-                     font=("", 12), padx=8, pady=6).pack()
-        # Auto-dismiss after 4 seconds
-        self._hide_id = self.widget.after(4000, self._hide)
+    @property
+    def visible(self) -> bool:
+        return self._tw is not None
 
-    def _hide(self, event=None):
-        if self._hide_id:
+    @property
+    def pending(self) -> bool:
+        return self._pending is not None
+
+    def on_enter(self, event=None):
+        """Pointer came onto the widget: show after DELAY_MS unless it leaves."""
+        self.cancel()
+        self._pending = self.widget.after(self.DELAY_MS, self._show_if_still_over)
+
+    def on_leave(self, event=None):
+        """Pointer left the widget, or it was clicked: cancel and hide."""
+        self.cancel()
+        self.hide()
+
+    def cancel(self):
+        """Drop a tooltip that is waiting to appear."""
+        if self._pending is not None:
             try:
-                self.widget.after_cancel(self._hide_id)
+                self.widget.after_cancel(self._pending)
             except Exception:
                 pass
-            self._hide_id = None
-        if self._tw:
+            self._pending = None
+
+    def _pointer_over(self) -> bool:
+        try:
+            x, y = self.widget.winfo_pointerxy()
+            under = self.widget.winfo_containing(x, y)
+        except Exception:
+            return False
+        while under is not None:
+            if under is self.widget:
+                return True
+            under = getattr(under, "master", None)
+        return False
+
+    def _show_if_still_over(self):
+        self._pending = None
+        if self._pointer_over():
+            self.show()
+            self._watch()
+
+    def _watch(self):
+        """Safety net for a missed <Leave>: hide once the pointer is elsewhere."""
+        if not self.visible:
+            return
+        if not self._pointer_over():
+            self.hide()
+        else:
+            self.widget.after(self.WATCH_MS, self._watch)
+
+    def show(self):
+        """Show now, next to the pointer. Any other tooltip is hidden first."""
+        _Tooltip.hide_current()
+        px, py = self.widget.winfo_pointerxy()
+        dark = ctk.get_appearance_mode() == "Dark"
+        self._tw = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.attributes("-topmost", True)
+        tk.Label(tw, text=self.text, wraplength=320, justify="left", padx=8, pady=6,
+                 bg="#333333" if dark else "#e5e5e5", fg="#f0f0f0" if dark else "#101010",
+                 relief="solid", borderwidth=1, font=("", 9)).pack()
+        tw.update_idletasks()
+        # Offset from the pointer, flipped to the other side at a screen edge,
+        # so the tooltip is never under the cursor.
+        width, height = tw.winfo_reqwidth(), tw.winfo_reqheight()
+        x, y = px + self.OFFSET[0], py + self.OFFSET[1]
+        if x + width > tw.winfo_screenwidth():
+            x = px - self.OFFSET[0] - width
+        if y + height > tw.winfo_screenheight():
+            y = py - self.OFFSET[1] - height
+        self.position = (max(0, x), max(0, y), width, height)
+        tw.wm_geometry(f"+{self.position[0]}+{self.position[1]}")
+        _Tooltip.current = self
+
+    def hide(self):
+        if self._tw is not None:
             try:
                 self._tw.destroy()
             except Exception:
                 pass
             self._tw = None
+        if _Tooltip.current is self:
+            _Tooltip.current = None
 
-    def _toggle(self, event=None):
-        if self._tw:
-            self._hide()
-        else:
-            self._show()
+    @classmethod
+    def hide_current(cls, event=None):
+        """Hide the tooltip that is showing and cancel any that is waiting."""
+        if cls.current is not None:
+            cls.current.hide()
+        for tip in cls.instances:
+            if tip.pending:
+                tip.cancel()
 
 
-def _help_btn(parent, text: str):
+def install_tooltip_dismissal(root) -> None:
+    """Hide the tooltip on scroll, on any click, when the application loses
+    focus and when the window is moved or resized."""
+    geometry = {}
+
+    def on_configure(event):
+        if event.widget is not root:
+            return
+        now = (event.x, event.y, event.width, event.height)
+        if geometry.get("last") not in (None, now):
+            _Tooltip.hide_current()
+        geometry["last"] = now
+
+    def on_focus_out(event):
+        # Focus moving between widgets of this window is not a loss of focus
+        def check():
+            try:
+                lost = root.focus_displayof() is None
+            except Exception:
+                lost = True
+            if lost:
+                _Tooltip.hide_current()
+        root.after(1, check)
+
+    for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>", "<ButtonPress>"):
+        root.bind_all(sequence, _Tooltip.hide_current, add="+")
+    root.bind("<FocusOut>", on_focus_out, add="+")
+    root.bind("<Configure>", on_configure, add="+")
+    root.tooltip_handlers = {"configure": on_configure, "focus_out": on_focus_out}
+
+
+def _help_btn(parent, text: str, pack: bool = True):
     """Create a small '?' button with a tooltip."""
     btn = ctk.CTkLabel(parent, text="?", width=18, height=18,
                        fg_color=("gray75", "gray35"), corner_radius=9,
                        font=("", 11, "bold"), text_color=("gray30", "gray80"),
                        cursor="hand2")
-    btn.pack(side="left", padx=(4, 0))
-    _Tooltip(btn, text)
+    if pack:
+        btn.pack(side="left", padx=(4, 0))
+    btn.tooltip = _Tooltip(btn, text)
     return btn
 
 
-# ── Bandwidth / PPS Input Panel ───────────────────────────────────────────────
+# ── Base panel: field registration and syncing ────────────────────────────────
 
-class BandwidthInputPanel(ctk.CTkFrame):
-    """Input fields for the Signal Bandwidth / PPS analysis tab.
-
-    R_series, VIL, VIH, and V_high are auto-pulled from the other panels
-    via AppState. Only bandwidth-specific inputs are shown here.
-    """
-
-    def __init__(self, parent, state: AppState):
-        super().__init__(parent, fg_color="transparent")
+class _FieldPanel(ctk.CTkFrame):
+    def __init__(self, parent, state: AppState, **kw):
+        super().__init__(parent, **kw)
         self.app_state = state
+        self.vars: dict = {}      # field key -> Tk variable
+        self.widgets: dict = {}   # field key -> widget
+        self.textboxes: dict = {}  # field key -> CTkTextbox (no Tk variable)
+        self.help: dict = {}      # field key -> its "?" button
+        self._fit_lines: dict = {}  # field key -> (min, max) lines of a box that grows
         self._build()
+        self.sync_from_state()
 
     def _build(self):
-        # Auto-derived values (read-only display)
-        ctk.CTkLabel(self, text="From Other Panels", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(5, 2))
-        auto = ctk.CTkFrame(self, fg_color="transparent"); auto.pack(fill="x", padx=5)
+        raise NotImplementedError
 
-        a1 = ctk.CTkFrame(auto, fg_color="transparent"); a1.pack(fill="x", pady=1)
-        ctk.CTkLabel(a1, text="R_series:", width=90, text_color="gray60").pack(side="left")
-        self.lbl_rs = ctk.CTkLabel(a1, text="--", width=70, anchor="w", text_color="gray60")
-        self.lbl_rs.pack(side="left", padx=2)
-        ctk.CTkLabel(a1, text="\u03a9", text_color="gray60").pack(side="left")
-        ctk.CTkLabel(a1, text="VIL:", text_color="gray60").pack(side="left", padx=(15, 2))
-        self.lbl_vil = ctk.CTkLabel(a1, text="--", width=50, anchor="w", text_color="gray60")
-        self.lbl_vil.pack(side="left", padx=2)
-        ctk.CTkLabel(a1, text="V", text_color="gray60").pack(side="left")
-        ctk.CTkLabel(a1, text="VIH:", text_color="gray60").pack(side="left", padx=(15, 2))
-        self.lbl_vih = ctk.CTkLabel(a1, text="--", width=50, anchor="w", text_color="gray60")
-        self.lbl_vih.pack(side="left", padx=2)
-        ctk.CTkLabel(a1, text="V", text_color="gray60").pack(side="left")
-        ctk.CTkLabel(a1, text="V_high:", text_color="gray60").pack(side="left", padx=(15, 2))
-        self.lbl_vhigh = ctk.CTkLabel(a1, text="--", width=50, anchor="w", text_color="gray60")
-        self.lbl_vhigh.pack(side="left", padx=2)
-        ctk.CTkLabel(a1, text="V", text_color="gray60").pack(side="left")
+    def _add_field(self, key, var, widget):
+        self.vars[key] = var
+        self.widgets[key] = widget
+        var.trace_add("write", lambda *_: self.app_state.set_field(key, var.get()))
 
-        # Uniform widths for all rows
-        LBL_W = 90   # label width
-        ENT_W = 80   # entry width
-        UNIT_W = 35  # unit label width
+    def _entry(self, parent, key, width):
+        var = ctk.StringVar(master=self, value="")
+        e = ctk.CTkEntry(parent, width=width, textvariable=var)
+        self._add_field(key, var, e)
+        return e
 
-        # Capacitance (bandwidth-specific)
-        ctk.CTkLabel(self, text="Capacitance", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(10, 2))
-        cap = ctk.CTkFrame(self, fg_color="transparent"); cap.pack(fill="x", padx=5)
+    def _combo(self, parent, key, values, width=70):
+        var = ctk.StringVar(master=self, value="")
+        c = ctk.CTkComboBox(parent, values=list(values), width=width,
+                            variable=var, state="readonly")
+        self._add_field(key, var, c)
+        return c
 
-        c1 = ctk.CTkFrame(cap, fg_color="transparent"); c1.pack(fill="x", pady=2)
-        ctk.CTkLabel(c1, text="C_diode:", width=LBL_W).pack(side="left")
-        self.c_diode = ctk.CTkEntry(c1, width=ENT_W); self.c_diode.pack(side="left", padx=2)
-        self.c_diode.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(c1, text="pF", width=UNIT_W).pack(side="left")
-        _help_btn(c1, "Protection diode junction capacitance at 0V reverse bias.\nFind in the diode datasheet under \"junction capacitance\" or \"Cj\".")
+    def _unit_combo(self, parent, key, width=70):
+        return self._combo(parent, key, UNIT_CHOICES, width)
 
-        c2 = ctk.CTkFrame(cap, fg_color="transparent"); c2.pack(fill="x", pady=2)
-        ctk.CTkLabel(c2, text="C_pin:", width=LBL_W).pack(side="left")
-        self.c_pin = ctk.CTkEntry(c2, width=ENT_W); self.c_pin.pack(side="left", padx=2)
-        self.c_pin.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(c2, text="pF", width=UNIT_W).pack(side="left")
-        _help_btn(c2, "MCU GPIO input capacitance.\nFind in the MCU datasheet under GPIO electrical specifications.")
+    def _checkbox(self, parent, key, text="", width=24):
+        var = ctk.StringVar(master=self, value="0")
+        c = ctk.CTkCheckBox(parent, text=text, width=width, variable=var,
+                            onvalue="1", offvalue="0")
+        self._add_field(key, var, c)
+        return c
 
-        c3 = ctk.CTkFrame(cap, fg_color="transparent"); c3.pack(fill="x", pady=2)
-        ctk.CTkLabel(c3, text="C_stray:", width=LBL_W).pack(side="left")
-        self.c_stray = ctk.CTkEntry(c3, width=ENT_W); self.c_stray.pack(side="left", padx=2)
-        self.c_stray.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(c3, text="pF", width=UNIT_W).pack(side="left")
-        _help_btn(c3, "PCB parasitic/stray capacitance estimate.\nTypically 2-5 pF. Depends on trace length and layout.")
+    def _textbox(self, parent, key, lines=2, max_lines=None):
+        """Free text over several lines, wrapped at word boundaries and
+        scrollable. With *max_lines* the box grows with its text, from
+        *lines* up to *max_lines* lines.
 
-        # Digital sampling
-        ctk.CTkLabel(self, text="Digital Sampling", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(10, 2))
-        dig = ctk.CTkFrame(self, fg_color="transparent"); dig.pack(fill="x", padx=5)
+        Text widgets have no Tk variable, so edits are caught with
+        <<Modified>>, which Tk raises for typing, paste, cut and delete alike."""
+        box = ctk.CTkTextbox(parent, height=self._lines_height(lines), wrap="word",
+                             border_width=1, border_color=("gray60", "gray40"))
 
-        d1 = ctk.CTkFrame(dig, fg_color="transparent"); d1.pack(fill="x", pady=2)
-        ctk.CTkLabel(d1, text="f_periph:", width=LBL_W).pack(side="left")
-        self.f_periph = ctk.CTkEntry(d1, width=ENT_W); self.f_periph.pack(side="left", padx=2)
-        self.f_periph.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(d1, text="MHz", width=UNIT_W).pack(side="left")
-        _help_btn(d1, "Peripheral clock frequency that samples the input pin.\nFind in the MCU reference manual clock tree diagram.")
+        def on_modified(event=None):
+            if not box.edit_modified():
+                return
+            box.edit_modified(False)
+            self.app_state.set_field(key, box.get("1.0", "end-1c"))
+            self._fit(key)
+        box.bind("<<Modified>>", on_modified)
+        self.textboxes[key] = box
+        self.widgets[key] = box
+        if max_lines:
+            self._fit_lines[key] = (lines, max_lines)
+            box.bind("<Configure>", lambda e: self._fit(key), add="+")
+        return box
 
-        d2 = ctk.CTkFrame(dig, fg_color="transparent"); d2.pack(fill="x", pady=2)
-        ctk.CTkLabel(d2, text="N_samples:", width=LBL_W).pack(side="left")
-        self.n_samples = ctk.CTkEntry(d2, width=ENT_W); self.n_samples.pack(side="left", padx=2)
-        self.n_samples.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(d2, text="", width=UNIT_W).pack(side="left")
-        _help_btn(d2, "Minimum consecutive samples required for valid edge detection.\nFind in the MCU reference manual under timer/input capture digital filter settings.")
+    @staticmethod
+    def _lines_height(lines: int) -> int:
+        """Height (CTk units) of a text box that shows *lines* lines."""
+        return 18 * lines + 16
 
-        # Counter overflow
-        ctk.CTkLabel(self, text="Counter Overflow", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(10, 2))
-        cnt = ctk.CTkFrame(self, fg_color="transparent"); cnt.pack(fill="x", padx=5)
+    def wrapped_lines(self, key) -> int:
+        """Display lines the text of a text box takes at its present width."""
+        box = self.textboxes[key]
+        inner = box._textbox
+        if inner.winfo_width() > 1:
+            counted = inner.count("1.0", "end-1c", "displaylines")
+            return (counted[0] if isinstance(counted, tuple) else counted or 0) + 1
+        # not laid out yet: estimate from the text
+        return sum(len(part) // 50 + 1 for part in box.get("1.0", "end-1c").split("\n"))
 
-        e1 = ctk.CTkFrame(cnt, fg_color="transparent"); e1.pack(fill="x", pady=2)
-        ctk.CTkLabel(e1, text="Bits:", width=LBL_W).pack(side="left")
-        self.counter_bits = ctk.CTkEntry(e1, width=ENT_W); self.counter_bits.pack(side="left", padx=2)
-        self.counter_bits.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(e1, text="", width=UNIT_W).pack(side="left")
-        _help_btn(e1, "Hardware counter width in bits (e.g. 16 or 32).\nFind in the MCU reference manual under timer/counter chapter.")
+    def _fit(self, key):
+        """Size a growing text box to its text."""
+        if key not in self._fit_lines:
+            return
+        box = self.textboxes[key]
+        low, high = self._fit_lines[key]
+        height = self._lines_height(max(low, min(high, self.wrapped_lines(key))))
+        if box.cget("height") != height:
+            box.configure(height=height)
 
-        e2 = ctk.CTkFrame(cnt, fg_color="transparent"); e2.pack(fill="x", pady=2)
-        ctk.CTkLabel(e2, text="Signed:", width=LBL_W).pack(side="left")
-        self.counter_signed = ctk.CTkCheckBox(e2, text="", width=ENT_W)
-        self.counter_signed.pack(side="left", padx=2)
-        self.counter_signed.configure(command=self._on_change)
-        ctk.CTkLabel(e2, text="", width=UNIT_W).pack(side="left")
-        _help_btn(e2, "Check if the counter counts +/- (signed).\nUses one bit for sign, halving the max count range.")
+    # ── the shared grid ───────────────────────────────────────────────────
 
-        e3 = ctk.CTkFrame(cnt, fg_color="transparent"); e3.pack(fill="x", pady=2)
-        ctk.CTkLabel(e3, text="f_read:", width=LBL_W).pack(side="left")
-        self.f_read = ctk.CTkEntry(e3, width=ENT_W); self.f_read.pack(side="left", padx=2)
-        self.f_read.bind("<KeyRelease>", self._on_change)
-        ctk.CTkLabel(e3, text="Hz", width=UNIT_W).pack(side="left")
-        _help_btn(e3, "How often firmware reads/resets the counter.\nTypically your PID loop rate or main polling frequency.")
+    def _grid(self, parent=None, padx=10):
+        """A grid frame with the columns the part panels share: label, field,
+        unit, slack, "?"."""
+        grid = ctk.CTkFrame(parent or self, fg_color="transparent")
+        grid.pack(fill="x", padx=padx, pady=(0, 4))
+        grid.grid_columnconfigure(0, minsize=LABEL_W)
+        grid.grid_columnconfigure(1, minsize=FIELD_W)
+        grid.grid_columnconfigure(2, minsize=UNIT_W)
+        grid.grid_columnconfigure(3, weight=1)
+        grid.grid_columnconfigure(HELP_COL, minsize=HELP_W)
+        grid.next_row = 0
+        return grid
 
-    def push_to_state(self):
-        bp = self.app_state.bandwidth_params
-        # Auto-pull from other panels via AppState
-        bp.r_series_ohms = self.app_state.resistors.rs_ohms
-        vdd = self.app_state.mcu.vdd
-        bp.vil_v = self.app_state.system.v_logic_low_max * (vdd / 3.3) if vdd > 0 else 0
-        bp.vih_v = self.app_state.system.v_logic_high_min * (vdd / 3.3) if vdd > 0 else 0
-        bp.v_high = vdd
-        # Bandwidth-specific inputs
-        bp.c_diode_pf = _safe_float(self.c_diode, 0)
-        bp.c_pin_pf = _safe_float(self.c_pin, 0)
-        bp.c_stray_pf = _safe_float(self.c_stray, 0)
-        bp.f_peripheral_mhz = _safe_float(self.f_periph, 0)
-        bp.n_samples = int(_safe_float(self.n_samples, 0))
-        bp.counter_bits = int(_safe_float(self.counter_bits, 0))
-        bp.counter_signed = bool(self.counter_signed.get())
-        bp.f_read_hz = _safe_float(self.f_read, 0)
+    @staticmethod
+    def _label(grid, text, row, sticky="w"):
+        ctk.CTkLabel(grid, text=text, anchor="w").grid(row=row, column=0, sticky=sticky, pady=3)
 
-    def refresh_auto_values(self):
-        """Update the read-only labels from AppState (called after main recalc)."""
-        rs = self.app_state.resistors.rs_ohms
-        vdd = self.app_state.mcu.vdd
-        vil = self.app_state.system.v_logic_low_max * (vdd / 3.3) if vdd > 0 else 0
-        vih = self.app_state.system.v_logic_high_min * (vdd / 3.3) if vdd > 0 else 0
-        self.lbl_rs.configure(text=f"{rs:.0f}" if rs else "--")
-        self.lbl_vil.configure(text=f"{vil:.2f}" if vdd > 0 else "--")
-        self.lbl_vih.configure(text=f"{vih:.2f}" if vdd > 0 else "--")
-        self.lbl_vhigh.configure(text=f"{vdd:.2f}" if vdd > 0 else "--")
+    def _help(self, grid, row, tip, key=None, column=HELP_COL):
+        if tip:
+            btn = _help_btn(grid, tip, pack=False)
+            btn.grid(row=row, column=column, sticky="e", padx=(4, 2))
+            if key:
+                self.help[key] = btn
 
-    def _on_change(self, event=None):
-        self.push_to_state()
-        self.app_state.recalculate_bandwidth()
+    def _row(self, grid, label, key, unit="", tip=None):
+        """label | entry | unit | ?"""
+        row = grid.next_row
+        grid.next_row += 1
+        self._label(grid, label, row)
+        self._entry(grid, key, FIELD_W).grid(row=row, column=1, sticky="w", pady=3)
+        ctk.CTkLabel(grid, text=unit, anchor="w").grid(row=row, column=2, sticky="w", padx=(4, 0))
+        self._help(grid, row, tip, key)
+
+    def _wide_row(self, grid, label, key):
+        """label | entry across the full width"""
+        row = grid.next_row
+        grid.next_row += 1
+        self._label(grid, label, row)
+        self._entry(grid, key, FIELD_W).grid(row=row, column=1, columnspan=HELP_COL,
+                                             sticky="ew", pady=3)
+
+    def _part_rows(self, grid, prefix):
+        """Source, note and the "checked" box that a diode or MCU carries."""
+        row = grid.next_row
+        grid.next_row += 3
+        self._label(grid, "Source:", row, sticky="nw")
+        self._textbox(grid, f"{prefix}.source", lines=2).grid(
+            row=row, column=1, columnspan=3, sticky="ew", pady=3)
+        self._help(grid, row, "Where the values come from: data sheet, revision, tables or\n"
+                              "figures used. Saved in the file's \"source\".", f"{prefix}.source")
+        self._label(grid, "Note:", row + 1, sticky="nw")
+        self._textbox(grid, f"{prefix}.note", lines=3, max_lines=16).grid(
+            row=row + 1, column=1, columnspan=HELP_COL, sticky="ew", pady=3)
+        self._checkbox(grid, f"{prefix}.checked", text="Checked against the data sheet").grid(
+            row=row + 2, column=1, columnspan=HELP_COL, sticky="w", pady=(3, 6))
+
+    def _labelled(self, parent, label, key, unit="", tip=None, lbl_w=110, ent_w=80, unit_w=45):
+        """A packed row (the Signal Bandwidth tab's two fields)."""
+        r = ctk.CTkFrame(parent, fg_color="transparent")
+        r.pack(fill="x", pady=2)
+        ctk.CTkLabel(r, text=label, width=lbl_w, anchor="w").pack(side="left")
+        self._entry(r, key, ent_w).pack(side="left", padx=2)
+        ctk.CTkLabel(r, text=unit, width=unit_w, anchor="w").pack(side="left")
+        if tip:
+            _help_btn(r, tip)
+        return r
+
+    def sync_from_state(self):
+        """Copy AppState's field text into the widgets (no-op where equal)."""
+        for key, var in self.vars.items():
+            text = self.app_state.fields[key]
+            if var.get() != text:
+                var.set(text)
+        for key, box in self.textboxes.items():
+            text = self.app_state.fields[key]
+            if box.get("1.0", "end-1c") != text:
+                box.delete("1.0", "end")
+                box.insert("1.0", text)
+            self._fit(key)
+
+
+# ── Resistor Panel ────────────────────────────────────────────────────────────
+
+class ResistorPanel(_FieldPanel):
+    """R1, R2 and R_s, one row each: value, unit, power rating, tolerance.
+
+    The label column, the value (field) column and the "?" column are those
+    of the part panels' grid, so the three line up with the panels below. A
+    header row names the columns."""
+
+    # header, field key suffix, width
+    COLUMNS = (("Value", "value", FIELD_W), ("Unit", "unit", 70),
+               ("Rating (mW)", "rating", 68), ("Tol. (%)", "tol", 48))
+    HELP_COL = len(COLUMNS) + 2     # columns: label, the four fields, slack, "?"
+    ROWS = (
+        ("r1", "R1:",
+         "R1: from the input to the node (the junction with R2 and the\n"
+         "clamp diode).\n"
+         "Rating: its power rating. The worst-case power at Max Input is\n"
+         "checked against it.\n"
+         "Tol.: its tolerance. The worst case takes R1 at both ends of it."),
+        ("r2", "R2:",
+         "R2: from the node to GND.\n"
+         "Rating: its power rating. The worst-case power at Max Input is\n"
+         "checked against it.\n"
+         "Tol.: its tolerance. The worst case takes R2 at both ends of it."),
+        ("rs", "R_s:",
+         "R_s: optional series resistor from the node to the MCU pin.\n"
+         "Blank or 0 = no series resistor; rating and tolerance are then\n"
+         "not needed.\n"
+         "Its power is worked out with the pin held at 0 V."),
+    )
+
+    def _build(self):
+        ctk.CTkLabel(self, text="Resistors", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
+        grid = self.grid_frame = ctk.CTkFrame(self, fg_color="transparent")
+        grid.pack(fill="x", padx=10, pady=(0, 2))
+        grid.grid_columnconfigure(0, minsize=LABEL_W)
+        grid.grid_columnconfigure(1, minsize=FIELD_W)
+        grid.grid_columnconfigure(self.HELP_COL - 1, weight=1)
+        grid.grid_columnconfigure(self.HELP_COL, minsize=HELP_W)
+
+        self.headers = []
+        for col, (text, _name, _width) in enumerate(self.COLUMNS, start=1):
+            header = ctk.CTkLabel(grid, text=text, anchor="w", text_color=MUTED,
+                                  font=("", 11), height=18)
+            header.grid(row=0, column=col, sticky="w", padx=(0 if col == 1 else 6, 0))
+            self.headers.append(header)
+
+        for row, (prefix, label, tip) in enumerate(self.ROWS, start=1):
+            self._label(grid, label, row)
+            for col, (_text, name, width) in enumerate(self.COLUMNS, start=1):
+                key = f"{prefix}.{name}"
+                field = (self._unit_combo(grid, key, width) if name == "unit"
+                         else self._entry(grid, key, width))
+                field.grid(row=row, column=col, sticky="w", pady=3,
+                           padx=(0 if col == 1 else 6, 0))
+            self._help(grid, row, tip, f"{prefix}.value", column=self.HELP_COL)
+        ctk.CTkLabel(self, text="R_s blank or 0 = no series resistor.",
+                     text_color=MUTED, font=("", 11)).pack(anchor="w", padx=10)
+
+
+# ── Clamp Diode Panel ─────────────────────────────────────────────────────────
+
+class _DiodeTable(ctk.CTkFrame):
+    """One editable clamp-diode table: a row is a current and the voltage
+    across the diode at that current (minimum, typical, maximum).
+
+    The table is in one of three states, shown plainly: not filled in (it is
+    needed), not modelled (its current is taken as zero), or rows."""
+
+    HEADERS = ("I (mA)", "V min", "V typ", "V max")
+    CELL_W = 80
+
+    def __init__(self, parent, state: AppState, table: str):
+        super().__init__(parent, fg_color="transparent")
+        self.app_state = state
+        self.table = table
+        self.cells: list = []     # per row: {row key: CTkEntry}
+        self._vars: list = []     # per row: {row key: StringVar}
+        self.delete_buttons: list = []
+
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.pack(fill="x")
+        ctk.CTkLabel(head, text=TABLE_TITLES[table], font=("", 12, "bold")).pack(side="left")
+        _help_btn(head, TABLE_TIPS[table])
+
+        # Header row and entry rows share one grid of fixed-width columns
+        self.grid_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.headers = []
+        for col, text in enumerate(self.HEADERS):
+            self.grid_frame.grid_columnconfigure(col, minsize=self.CELL_W + 4)
+            header = ctk.CTkLabel(self.grid_frame, text=text, width=self.CELL_W, anchor="w",
+                                  text_color=MUTED, font=("", 11))
+            header.grid(row=0, column=col, padx=(0, 4), sticky="w")
+            self.headers.append(header)
+
+        self.state_label = ctk.CTkLabel(self, text="", anchor="w", font=("", 12))
+
+        # "+ Add row" directly under the table, on the left
+        self.foot = ctk.CTkFrame(self, fg_color="transparent")
+        self.add_button = ctk.CTkButton(self.foot, text="+ Add row", width=84, height=24,
+                                        command=lambda: state.add_row(table))
+        self.add_button.pack(side="left")
+        self._not_modelled = ctk.StringVar(master=self, value="0")
+        self.not_modelled_box = ctk.CTkCheckBox(
+            self.foot, text="Not modelled", variable=self._not_modelled, onvalue="1",
+            offvalue="0", checkbox_width=18, checkbox_height=18,
+            command=lambda: state.set_not_modelled(table, self._not_modelled.get() == "1"))
+        self.not_modelled_box.pack(side="left", padx=(16, 0))
+        self.sync_from_state()
+
+    def _rebuild(self, rows):
+        for row in self.cells:
+            for entry in row.values():
+                entry.destroy()
+        for button in self.delete_buttons:
+            button.destroy()
+        self.cells, self._vars, self.delete_buttons = [], [], []
+        for i, texts in enumerate(rows):
+            entries, variables = {}, {}
+            for col, key in enumerate(ROW_KEYS):
+                var = ctk.StringVar(master=self, value=texts[key])
+                var.trace_add("write", lambda *_, i=i, key=key, var=var:
+                              self.app_state.set_cell(self.table, i, key, var.get()))
+                entry = ctk.CTkEntry(self.grid_frame, width=self.CELL_W, textvariable=var)
+                entry.grid(row=i + 1, column=col, padx=(0, 4), pady=1, sticky="w")
+                entries[key], variables[key] = entry, var
+            button = ctk.CTkButton(self.grid_frame, text="×", width=24, height=24,
+                                   fg_color="gray40", hover_color="gray30",
+                                   command=lambda i=i: self.app_state.delete_row(self.table, i))
+            button.grid(row=i + 1, column=len(ROW_KEYS), padx=(2, 0))
+            self.cells.append(entries)
+            self._vars.append(variables)
+            self.delete_buttons.append(button)
+
+    def sync_from_state(self):
+        state = self.app_state.table_state(self.table)
+        rows = self.app_state.tables[self.table] or []
+        if len(rows) != len(self.cells):
+            self._rebuild(rows)
+        else:
+            for variables, texts in zip(self._vars, rows):
+                for key, var in variables.items():
+                    if var.get() != texts[key]:
+                        var.set(texts[key])
+
+        # Rows: the header and the entries. No rows: one line naming the state.
+        self.grid_frame.pack_forget()
+        self.state_label.pack_forget()
+        self.foot.pack_forget()
+        if state == ROWS:
+            self.grid_frame.pack(fill="x", pady=(2, 0))
+        else:
+            self.state_label.configure(
+                text=TABLE_STATE_TEXT[state],
+                text_color="orange" if state == BLANK else MUTED)
+            self.state_label.pack(fill="x", pady=(2, 0))
+        self.foot.pack(fill="x", pady=(3, 0))
+
+        # The "Not modelled" box switches between blank and not modelled; it
+        # has no meaning while the table has rows.
+        self._not_modelled.set("1" if state == NOT_MODELLED else "0")
+        self.not_modelled_box.configure(state="disabled" if state == ROWS else "normal")
+
+    @property
+    def state_text(self) -> str:
+        """The state line as shown ("" while the table has rows)."""
+        return self.state_label.cget("text") if self.state_label.winfo_manager() else ""
+
+
+class ClampDiodePanel(_FieldPanel):
+    """One clamp diode of either kind: part name, type, connection, the
+    forward and reverse tables, capacitance, power rating, source, note and
+    the "checked" box. No presets: values are typed or come from the file."""
+
+    def _build(self):
+        ctk.CTkLabel(self, text="Clamp Diode", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
+        grid = self._grid()
+
+        self._wide_row(grid, "Part:", "diode.part")
+
+        row = grid.next_row
+        grid.next_row += 1
+        self._label(grid, "Type:", row)
+        self._combo(grid, "diode.type", DIODE_TYPES, 120).grid(row=row, column=1, columnspan=3,
+                                                              sticky="w", pady=3)
+        self._help(grid, row, "Zener or Schottky. A label only: the calculation uses the\n"
+                              "connection and the two tables, whatever the type.", "diode.type")
+
+        row = grid.next_row
+        grid.next_row += 1
+        self._label(grid, "Connection:", row)
+        pair = ctk.CTkFrame(grid, fg_color="transparent")
+        pair.grid(row=row, column=1, columnspan=3, sticky="w", pady=3)
+        ctk.CTkLabel(pair, text="Anode").pack(side="left")
+        self._combo(pair, "diode.anode", TERMINALS, 84).pack(side="left", padx=(6, 0))
+        ctk.CTkLabel(pair, text="Cathode").pack(side="left", padx=(18, 0))
+        self._combo(pair, "diode.cathode", TERMINALS, 84).pack(side="left", padx=(6, 0))
+        self._help(grid, row, "Where each terminal of the diode is connected. \"node\" is the\n"
+                              "junction of R1 and R2; exactly one terminal is at the node.\n"
+                              "Zener to GND: anode gnd, cathode node.\n"
+                              "Schottky to the rail: anode node, cathode vdd.\n"
+                              "Schottky to GND: anode gnd, cathode node.", "diode.anode")
+
+        # One row each, on the grid: field, unit and "?" where every row has them
+        self._row(grid, "Capacitance:", "diode.capacitance_pf", "pF",
+                  "Diode capacitance at 0 V bias, or the data-sheet maximum.\n"
+                  "Used for the Signal Bandwidth time constant.")
+        self._row(grid, "Ptot:", "diode.ptot_mw", "mW",
+                  "Power rating of the diode (total power dissipation).\n"
+                  "The worst-case diode power at Max Input is checked against it.")
+
+        self.tables = {}
+        for table in ("forward", "reverse"):
+            self.tables[table] = _DiodeTable(self, self.app_state, table)
+            self.tables[table].pack(fill="x", padx=10, pady=(6, 4))
+
+        self._part_rows(self._grid(), "diode")
+
+    def sync_from_state(self):
+        super().sync_from_state()
+        for table in getattr(self, "tables", {}).values():
+            table.sync_from_state()
+
+
+# ── MCU Panel ─────────────────────────────────────────────────────────────────
+
+class McuPanel(_FieldPanel):
+    def _build(self):
+        ctk.CTkLabel(self, text="MCU Pin Input Limits", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
+        grid = self._grid()
+
+        self._wide_row(grid, "Part:", "mcu.part")
+        self._row(grid, "Pin type:", "mcu.pin_type", "",
+                  "A label for the kind of pin, such as TT or FT. The limits\n"
+                  "below are the ones the data sheet gives for that pin type.")
+        rows = [
+            ("mcu.vdd", "VDD/VDDA:", "V",
+             "Supply voltage. Also used as the ADC reference (VREF), and as the\n"
+             "voltage of the rail when the clamp diode is connected to vdd."),
+            ("mcu.v_recommended_max", "Safe Max:", "V",
+             "Highest pin voltage in normal operation. The check against it is\n"
+             "the guard against current into the pin's protection diodes.\n"
+             "STM32G4 TT pins: VDD + 0.3 V (DS12983 Rev 5, Table 17)."),
+            ("mcu.v_absolute_max", "Abs. Max:", "V",
+             "Absolute maximum pin voltage: above it the pin may be damaged.\n"
+             "The highest pin voltage at Max Input is checked against it.\n"
+             "STM32G4 TT pins: 4.0 V (DS12983 Rev 5, Table 14)."),
+            ("mcu.v_pin_min", "Pin Min:", "V",
+             "Lowest allowed pin voltage (0 or negative). Checked only when a\n"
+             "negative Min Input is given.\n"
+             "STM32G4: VSS - 0.3 V (DS12983 Rev 5, Table 14)."),
+            ("mcu.adc_bits", "ADC bits:", "bits",
+             "ADC resolution N; resolution = VREF / 2^N.\n"
+             "STM32G4: 12-bit ADCs (STM32G484 datasheet DS12983 Rev 5, "
+             "Features: 5 x 12-bit ADCs)."),
+            ("mcu.vil_factor", "VIL factor:", "×VDD",
+             "Pin input-low threshold as a fraction of VDD (VIL = factor × VDD).\n"
+             "STM32G4: 0.3 (STM32G484 datasheet DS12983 Rev 5, Table 54, "
+             "all I/Os except FT_c)."),
+            ("mcu.vih_factor", "VIH factor:", "×VDD",
+             "Pin input-high threshold as a fraction of VDD (VIH = factor × VDD).\n"
+             "STM32G4: 0.7 (STM32G484 datasheet DS12983 Rev 5, Table 54, "
+             "all I/Os except FT_c)."),
+            ("mcu.c_pin_pf", "C_pin:", "pF",
+             "MCU pin input capacitance. Used for the Signal Bandwidth time\n"
+             "constant. STM32G4: CIO 5 pF typ (DS12983 Rev 5, Table 54)."),
+            ("mcu.t_pulse_min_ns", "Min pulse width:", "ns",
+             "Shortest pulse the input peripheral accepts. Used for the Signal\n"
+             "Bandwidth limits. STM32G4 timer inputs: 2 to 3 timer clock\n"
+             "periods (DS12983 Rev 5, Table 84)."),
+        ]
+        for key, label, unit, tip in rows:
+            self._row(grid, label, key, unit, tip)
+        self._part_rows(grid, "mcu")
+
+
+# ── System Panel ──────────────────────────────────────────────────────────────
+
+class SystemPanel(_FieldPanel):
+    FOOTNOTE = "Optional values left blank leave their check out."
+
+    def _build(self):
+        ctk.CTkLabel(self, text="System Requirements", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
+        grid = self._grid()
+        for key, label, unit, tip in (
+                ("system.v_input_max", "Max Input:", "V",
+                 "The highest input voltage. The pin voltage and the power in\n"
+                 "each part are checked at this input."),
+                ("system.v_input_min", "Min Input:", "V",
+                 "Optional: the lowest input voltage. When it is negative, the\n"
+                 "lowest pin voltage is checked against Pin Min."),
+                ("system.v_analog_fullscale", "ADC Scale:", "V",
+                 "Optional: the input voltage at ADC full scale. Gives the\n"
+                 "analog range check and the analog error."),
+                ("system.analog_error_allowed_pct", "Allowed error:", "%",
+                 "Optional: allowed analog error at ADC Scale, in percent.\n"
+                 "Without it the analog error is shown for information only."),
+                ("system.v_logic_high_min", "Logic High:", "V min",
+                 "The lowest input voltage that must read as logic high."),
+                ("system.v_logic_low_max", "Logic Low:", "V max",
+                 "The highest input voltage that must read as logic low."),
+                ("system.v_touch", "Touch voltage:", "V",
+                 "Optional: a voltage the input may touch, for example 60 V.\n"
+                 "Gives information rows only: it changes no verdict."),
+                ("system.f_required_hz", "Required freq.:", "Hz",
+                 "Optional: the input frequency the pin must handle (at the pin,\n"
+                 "50 % duty). Compared with the Signal Bandwidth limits.")):
+            self._row(grid, label, key, unit, tip)
+        # Its own row below the grid, wrapped, with room under it
+        self.footnote = ctk.CTkLabel(self, text=self.FOOTNOTE, text_color=MUTED, font=("", 11),
+                                     anchor="w", justify="left", wraplength=400, height=20)
+        self.footnote.pack(fill="x", padx=10, pady=(2, 12))
+
+
+# ── Notes Panel ───────────────────────────────────────────────────────────────
+
+class NotesPanel(ctk.CTkFrame):
+    """Text widgets have no Tk variable, so edits are caught with <<Modified>>,
+    which Tk raises for typing, paste, cut and delete alike."""
+
+    def __init__(self, parent, state: AppState):
+        super().__init__(parent)
+        self.app_state = state
+        ctk.CTkLabel(self, text="Design Notes", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
+        self.textbox = ctk.CTkTextbox(self, height=80, wrap="word")
+        self.textbox.pack(fill="x", padx=10, pady=(5, 10))
+        self.textbox.bind("<<Modified>>", self._on_modified)
+        self.sync_from_state()
+
+    def _on_modified(self, event=None):
+        if not self.textbox.edit_modified():
+            return
+        self.textbox.edit_modified(False)
+        self.app_state.set_field("notes", self.textbox.get("1.0", "end-1c"))
+
+    def sync_from_state(self):
+        text = self.app_state.fields["notes"]
+        if self.textbox.get("1.0", "end-1c") != text:
+            self.textbox.delete("1.0", "end")
+            self.textbox.insert("1.0", text)
+
+
+# ── Signal Bandwidth Input Panel ──────────────────────────────────────────────
+
+class BandwidthInputPanel(_FieldPanel):
+    """Input fields of the Signal Bandwidth tab: the two board values. The
+    diode capacitance comes from the Clamp Diode panel, the pin capacitance
+    and the minimum pulse width from the MCU panel, and the required
+    frequency from the System panel."""
+
+    def __init__(self, parent, state: AppState):
+        super().__init__(parent, state, fg_color="transparent")
+
+    def _build(self):
+        LBL_W, ENT_W, UNIT_W = 110, 80, 35
+
+        ctk.CTkLabel(self, text="Board", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(5, 2))
+        board = ctk.CTkFrame(self, fg_color="transparent")
+        board.pack(fill="x", padx=5)
+        self._labelled(board, "C_stray:", "bw.c_stray_pf", "pF",
+                       "PCB parasitic/stray capacitance estimate.\n"
+                       "Typically 2-5 pF. Depends on trace length and layout.",
+                       lbl_w=LBL_W, ent_w=ENT_W, unit_w=UNIT_W)
+        self._labelled(board, "Margin factor:", "bw.margin_factor", "",
+                       "\"Reliable up to\" = \"may work up to\" ÷ this factor (1 or more).\n"
+                       "Starting value 1.5: owner's example, 2026-11-09: 1 MHz\n"
+                       "reliable, 1.5 MHz may work.",
+                       lbl_w=LBL_W, ent_w=ENT_W, unit_w=UNIT_W)
+
+        self.fill_button = ctk.CTkButton(
+            self, text="Fill from starting values", height=28,
+            command=self.app_state.fill_bandwidth_starting_values)
+        self.fill_button.pack(anchor="w", padx=5, pady=(12, 2))
+        ctk.CTkLabel(self, text="Fills only blank or unreadable fields above.",
+                     text_color=MUTED, font=("", 11)).pack(anchor="w", padx=5)
+        ctk.CTkLabel(self, text=OTHER_PANELS_NOTE, text_color=MUTED, font=("", 11),
+                     justify="left", wraplength=340).pack(anchor="w", padx=5, pady=(12, 2))

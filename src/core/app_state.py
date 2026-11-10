@@ -1,72 +1,245 @@
 """
-Controller / State Manager for the Divider Calculator.
-Handles File I/O (JSON), dirty-tracking, and synchronization
-between UI inputs and calculation models.
+Controller / State Manager for the MCU Input Protection Calculator.
+
+AppState owns the raw text of every input field and of every cell of the
+two clamp-diode tables. The UI forwards what the user types (set_field,
+set_cell) and displays what AppState hands back; it never parses or
+calculates.
+
+On every change AppState:
+  1. parses each field (blank -> None, unreadable text and range problems
+     are noted),
+  2. builds the design dict (the layout of a .div file, format 2.0),
+  3. calls the solver (src/models/clamp_solver.py) with it,
+  4. sweeps the solver over the input range for the plot (plain lists: the
+     typical curve from its pin-voltage function, the lowest and the
+     highest from its corners, one call per point),
+  5. builds an input report: which blank fields are needed, which fields
+     have problems, and any solver warnings.
+
+No hidden defaults: nothing is ever substituted for a blank field. The only
+values the app fills in by itself are the visible bandwidth starting values
+(constants.BANDWIDTH_STARTING_VALUES). There are no part presets: every
+clamp diode and MCU value comes from the .div file or from the user.
+
+Each clamp-diode table is in one of three states: blank (None: not filled
+in, needed), not modelled ([]: its current is taken as zero) or rows.
+
+A file that is opened and saved without editing gets every input back
+exactly as it was written (10 stays 10, 10.0 stays 10.0, null stays null):
+AppState remembers the value each field was loaded with and writes it back
+while the field's text is unchanged. An edited value is written as entered.
+
+Also handles file I/O (.div format 2.0, src/core/div_format.py) and
+dirty-tracking.
 """
 from __future__ import annotations
 
-import json
+import math
 import os
+import re
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Optional
 
+from src.core import div_format
 from src.core.constants import (
-    DEFAULT_VALUES, FILE_FORMAT_VERSION, ZENER_PRESETS
+    BANDWIDTH_STARTING_VALUES, NEW_DESIGN_UNITS, PLOT_POINTS, RESISTOR_UNITS,
 )
-from src.models.circuit_model import (
-    CalculationResult, McuParams, ResistorParams, SystemParams, ZenerParams,
-    calculate_all,
+from src.core.div_format import DIODE_TYPES, DivError
+from src.models import clamp_solver as solver
+from src.models.clamp_solver import ROW_KEYS, TABLES, TERMINALS
+
+
+# ── Field registry ────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class FieldSpec:
+    key: str            # AppState / UI key
+    label: str          # shown in messages
+    kind: str           # "float", "int", "unit", "bool", "text", "choice"
+    path: tuple         # location in the .div JSON
+    choices: tuple = ()  # allowed values of a "choice" field
+
+    @property
+    def dotted(self) -> str:
+        return ".".join(self.path)
+
+
+def _resistor_fields(prefix, name, json_name):
+    return [
+        FieldSpec(f"{prefix}.value", f"{name} value", "float", ("resistors", json_name, "value")),
+        FieldSpec(f"{prefix}.unit", f"{name} unit", "unit", ("resistors", json_name, "unit")),
+        FieldSpec(f"{prefix}.rating", f"{name} power rating", "float", ("resistors", json_name, "rating_mw")),
+        FieldSpec(f"{prefix}.tol", f"{name} tolerance", "float", ("resistors", json_name, "tolerance_pct")),
+    ]
+
+
+# name, label, kind
+DIODE_FIELD_NAMES = [
+    ("part", "Clamp diode part", "text"), ("type", "Clamp diode type", "choice"),
+    ("anode", "Anode connection", "choice"), ("cathode", "Cathode connection", "choice"),
+    ("capacitance_pf", "C_diode", "float"), ("ptot_mw", "Clamp diode Ptot", "float"),
+    ("source", "Clamp diode source", "text"), ("note", "Clamp diode note", "text"),
+    ("checked", "Clamp diode checked", "bool"),
+]
+MCU_FIELD_NAMES = [
+    ("part", "MCU part", "text"), ("pin_type", "Pin type", "text"),
+    ("vdd", "VDD/VDDA", "float"), ("v_recommended_max", "Safe Max", "float"),
+    ("v_absolute_max", "Abs. Max", "float"), ("v_pin_min", "Pin Min", "float"),
+    ("adc_bits", "ADC bits", "int"), ("vil_factor", "VIL factor", "float"),
+    ("vih_factor", "VIH factor", "float"), ("c_pin_pf", "C_pin", "float"),
+    ("t_pulse_min_ns", "Min pulse width", "float"),
+    ("source", "MCU source", "text"), ("note", "MCU note", "text"),
+    ("checked", "MCU checked", "bool"),
+]
+SYSTEM_FIELD_NAMES = [
+    ("v_input_max", "Max Input"), ("v_input_min", "Min Input"),
+    ("v_analog_fullscale", "ADC Scale"), ("analog_error_allowed_pct", "Allowed analog error"),
+    ("v_logic_high_min", "Logic High"), ("v_logic_low_max", "Logic Low"),
+    ("v_touch", "Touch voltage"), ("f_required_hz", "Required frequency"),
+]
+BANDWIDTH_FIELD_NAMES = [
+    ("c_stray_pf", "C_stray", "float"), ("margin_factor", "Margin factor", "float"),
+]
+_CHOICES = {"type": DIODE_TYPES, "anode": TERMINALS, "cathode": TERMINALS}
+
+FIELD_SPECS: list = (
+    _resistor_fields("r1", "R1", "r1")
+    + _resistor_fields("r2", "R2", "r2")
+    + _resistor_fields("rs", "R_s", "r_series")
+    + [FieldSpec(f"diode.{n}", label, kind, ("clamp_diode", n), _CHOICES.get(n, ()))
+       for n, label, kind in DIODE_FIELD_NAMES]
+    + [FieldSpec(f"mcu.{n}", label, kind, ("mcu", n)) for n, label, kind in MCU_FIELD_NAMES]
+    + [FieldSpec(f"system.{n}", label, "float", ("system", n)) for n, label in SYSTEM_FIELD_NAMES]
+    + [FieldSpec(f"bw.{n}", label, kind, ("bandwidth", n)) for n, label, kind in BANDWIDTH_FIELD_NAMES]
+    + [FieldSpec("notes", "Design notes", "text", ("notes",))]
 )
-from src.models.bandwidth_model import (
-    BandwidthParams, BandwidthResult, calculate_bandwidth,
-)
+FIELDS = {f.key: f for f in FIELD_SPECS}
+FIELD_ORDER = {f.key: i for i, f in enumerate(FIELD_SPECS)}
+PATH_KEYS = {f.dotted: f.key for f in FIELD_SPECS}     # "mcu.vdd" -> "mcu.vdd", ...
+BANDWIDTH_KEYS = [f"bw.{n}" for n, _, _ in BANDWIDTH_FIELD_NAMES]
+
+# Table states
+BLANK, NOT_MODELLED, ROWS = "blank", "not modelled", "rows"
+
+# Editing a value of a part unticks that part's "checked against the data
+# sheet" box. Its name, source and note are not values.
+_NOT_VALUES = ("part", "source", "note", "checked")
+_WHOLE_NUMBER = re.compile(r"[+-]?\d+")
+_NEW = object()         # "created" of a design that has not been saved yet
+
+TABLE_LABELS = {"forward": "Forward table", "reverse": "Reverse table"}
+CELL_LABELS = {"i_ma": "current", "v_min": "V min", "v_typ": "V typ", "v_max": "V max"}
+_TABLE_PATH = re.compile(r"clamp_diode\.(forward|reverse)(?:\[(\d+)\](?:\.(\w+))?)?$")
+
+
+class LoadError(Exception):
+    """A .div file could not be loaded. The message lists every problem,
+    each starting with its key path."""
+
+
+def format_number(v) -> str:
+    """Text shown in a field for a number loaded from a file."""
+    if isinstance(v, bool):
+        return "1" if v else "0"
+    if isinstance(v, int):
+        return str(v)
+    v = float(v)
+    if v.is_integer() and abs(v) < 1e15:
+        return str(int(v))
+    return repr(v)
+
+
+def path_label(path: str) -> str:
+    """Screen label of a .div key path ("mcu.vdd" -> "VDD/VDDA")."""
+    if path in PATH_KEYS:
+        return FIELDS[PATH_KEYS[path]].label
+    m = _TABLE_PATH.match(path)
+    if m:
+        table, row, cell = m.groups()
+        label = TABLE_LABELS[table]
+        if row is not None:
+            label += f" row {int(row) + 1}"
+        if cell is not None:
+            label += f" {CELL_LABELS.get(cell, cell)}"
+        return label
+    return path
+
+
+@dataclass
+class InputReport:
+    needs: list = field(default_factory=list)        # labels of blank fields some result needs
+    problems: list = field(default_factory=list)     # "label: message"
+    warnings: list = field(default_factory=list)     # solver warnings
+
+    def lines(self) -> list:
+        out = []
+        if self.needs:
+            out.append("Needs input: " + ", ".join(self.needs))
+        if self.problems:
+            out.append("Fix: " + "; ".join(self.problems))
+        out.extend(self.warnings)
+        return out
 
 
 class AppState:
-    """Central state manager that owns all parameter values and calculation results."""
+    """Central state manager that owns all input text, the design and the results."""
 
     def __init__(self):
         self.current_file: Optional[str] = None
         self.is_dirty: bool = False
         self._ignore_changes: bool = False
+        self.last_save_error: Optional[str] = None
 
         # Callbacks
         self._on_title_changed: Optional[Callable[[str], None]] = None
-        self._on_results_changed: Optional[Callable[[CalculationResult], None]] = None
-        self._on_bandwidth_changed: Optional[Callable[[BandwidthResult], None]] = None
+        self._on_results_changed: Optional[Callable[[dict], None]] = None
+        self._on_fields_changed: Optional[Callable[[], None]] = None
 
-        # Current parameter objects (populated from UI or file)
-        self.resistors = ResistorParams()
-        self.zener = ZenerParams()
-        self.mcu = McuParams()
-        self.system = SystemParams()
-        self.bandwidth_params = BandwidthParams()
-        self.notes: str = ""
+        # Raw text of every field and of every table cell
+        self.fields: dict = {}
+        self.tables: dict = {}       # "forward" / "reverse" -> None, [] or [{row key: text}]
+        # What the open file held, so that an unedited input is saved back
+        # exactly as written: field key -> (text shown, JSON value), and per
+        # table row {row key: (text shown, JSON value)}.
+        self._origin: dict = {}
+        self._cell_origin: dict = {}
+        self._created = _NEW
+        self._reset_fields()
 
-        # Display units/values for serialisation (matches .div format)
-        self.r1_display_value: float = 10.0
-        self.r1_display_unit: str = "k\u03a9"
-        self.r2_display_value: float = 18.0
-        self.r2_display_unit: str = "k\u03a9"
-        self.rs_display_value: float = 0.0
-        self.rs_display_unit: str = "\u03a9"
-        self.rs_rating_mw: Optional[float] = None
-        self.rs_tol_pct: Optional[float] = None
-
-        # Last calculation result
-        self.result: Optional[CalculationResult] = None
-        self.bw_result: Optional[BandwidthResult] = None
+        # Parsed state (rebuilt by recalculate)
+        self._values: dict = {}      # key -> parsed value if readable, else None
+        self._problems: dict = {}    # key path -> message
+        self._unreadable: set = set()        # field keys
+        self._unreadable_cells: set = set()  # (table, row, cell key)
+        self._cells: dict = {}       # table -> [{row key: number / None / nan}]
+        self.design: dict = {}       # what the solver was given
+        self.results: dict = {}      # what the solver returned
+        self.circuit = None          # solver.Circuit of the design, for sweeps
+        self.plot_data: dict = {}    # plain lists for the plot ({} = nothing to draw)
+        self.plot_message: str = ""
+        self.plot_unsettled_points: int = 0  # plot points with a solve that did not settle
+        self.report = InputReport()
+        self.recalculate()
 
     # ── Callbacks ─────────────────────────────────────────────────────────
 
     def set_title_callback(self, cb: Callable[[str], None]):
         self._on_title_changed = cb
 
-    def set_results_callback(self, cb: Callable[[CalculationResult], None]):
+    def set_results_callback(self, cb: Callable[[dict], None]):
         self._on_results_changed = cb
 
-    def set_bandwidth_callback(self, cb: Callable[[BandwidthResult], None]):
-        self._on_bandwidth_changed = cb
+    def set_fields_callback(self, cb: Callable[[], None]):
+        """Called when AppState changed field text itself (load, new, fill,
+        table row added or deleted)."""
+        self._on_fields_changed = cb
+
+    def _fire_fields(self):
+        if self._on_fields_changed:
+            self._on_fields_changed()
 
     # ── Dirty tracking ────────────────────────────────────────────────────
 
@@ -78,6 +251,16 @@ class AppState:
     def ignore_changes(self, value: bool):
         self._ignore_changes = value
 
+    @contextmanager
+    def suspend_changes(self):
+        """Suppress dirty-marking inside the block; always restored, even on error."""
+        previous = self._ignore_changes
+        self._ignore_changes = True
+        try:
+            yield
+        finally:
+            self._ignore_changes = previous
+
     def mark_dirty(self):
         if self._ignore_changes:
             return
@@ -86,187 +269,579 @@ class AppState:
 
     def _fire_title(self):
         if self._on_title_changed:
-            name = os.path.basename(self.current_file) if self.current_file else "Untitled"
-            dirty = " *" if self.is_dirty else ""
-            self._on_title_changed(f"MCU Input Protection Calculator - {name}{dirty}")
+            self._on_title_changed(self.title())
+
+    def title(self) -> str:
+        name = os.path.basename(self.current_file) if self.current_file else "Untitled"
+        dirty = " *" if self.is_dirty else ""
+        return f"MCU Input Protection Calculator - {name}{dirty}"
+
+    # ── Field editing (the only way inputs change) ────────────────────────
+
+    @property
+    def notes(self) -> str:
+        return self.fields["notes"]
+
+    @notes.setter
+    def notes(self, text: str):
+        self.fields["notes"] = text or ""
+
+    def set_field(self, key: str, text) -> None:
+        """Store the text the user typed. Marks unsaved and recalculates if
+        it changed (free-text fields change no result)."""
+        if key not in FIELDS:
+            raise KeyError(key)
+        text = "" if text is None else str(text)
+        if self.fields.get(key) == text:
+            return
+        self.fields[key] = text
+        self.mark_dirty()
+        unticked = self._untick_checked([key])
+        if FIELDS[key].kind != "text":
+            self.recalculate()
+        if unticked:
+            self._fire_fields()
+
+    def _untick_checked(self, keys, explicit=()) -> bool:
+        """Editing a value of the clamp diode or the MCU unticks that part's
+        "checked against the data sheet" box. Returns True if a box changed."""
+        changed = False
+        for section in ("diode", "mcu"):
+            box = f"{section}.checked"
+            if box in explicit or self.fields[box] != "1":
+                continue
+            if any(k.startswith(section + ".") and k.split(".", 1)[1] not in _NOT_VALUES
+                   for k in keys):
+                self.fields[box] = "0"
+                changed = True
+        return changed
+
+    def set_fields(self, values: dict) -> None:
+        """Set several fields at once (one recalculation). The UI is told to
+        show the new text."""
+        changed = []
+        for key, text in values.items():
+            if key not in FIELDS:
+                raise KeyError(key)
+            text = "" if text is None else str(text)
+            if self.fields.get(key) != text:
+                self.fields[key] = text
+                changed.append(key)
+        if changed:
+            self._untick_checked(changed, explicit=values)
+            self.mark_dirty()
+            self.recalculate()
+            self._fire_fields()
+
+    def _reset_fields(self):
+        """Blank design: every field blank and both diode tables blank (not
+        filled in), except visible unit selectors and the visible bandwidth
+        starting values."""
+        self.fields = {spec.key: ("0" if spec.kind == "bool" else "") for spec in FIELD_SPECS}
+        for name, unit in NEW_DESIGN_UNITS.items():
+            self.fields[f"{name}.unit"] = unit
+        for name, value in BANDWIDTH_STARTING_VALUES.items():
+            self.fields[f"bw.{name}"] = format_number(value)
+        self.tables = {t: None for t in TABLES}
+        self._origin = {}
+        self._cell_origin = {t: [] for t in TABLES}
+        self._created = _NEW
+
+    def fill_bandwidth_starting_values(self) -> list:
+        """Fill blank or unreadable bandwidth fields from the starting values.
+        Returns the labels of the fields filled."""
+        filled = []
+        for name, value in BANDWIDTH_STARTING_VALUES.items():
+            key = f"bw.{name}"
+            if self.fields[key].strip() == "" or key in self._unreadable:
+                self.fields[key] = format_number(value)
+                filled.append(FIELDS[key].label)
+        if filled:
+            self.mark_dirty()
+            self.recalculate()
+            self._fire_fields()
+        return filled
+
+    # ── Clamp diode tables ────────────────────────────────────────────────
+
+    def table_state(self, table: str) -> str:
+        """BLANK (not filled in: needed), NOT_MODELLED (its current is taken
+        as zero) or ROWS."""
+        rows = self.tables[table]
+        return BLANK if rows is None else ROWS if rows else NOT_MODELLED
+
+    def set_cell(self, table: str, row: int, key: str, text) -> None:
+        """Store the text typed into one table cell."""
+        text = "" if text is None else str(text)
+        if self.tables[table][row][key] == text:
+            return
+        self.tables[table][row][key] = text
+        self.mark_dirty()
+        unticked = self._untick_checked(["diode.table"])
+        self.recalculate()
+        if unticked:
+            self._fire_fields()
+
+    def add_row(self, table: str) -> None:
+        """Append a blank row (a blank or not-modelled table becomes rows).
+        Its cells are needed until filled in."""
+        if not self.tables[table]:
+            self.tables[table], self._cell_origin[table] = [], []
+        self.tables[table].append({key: "" for key in ROW_KEYS})
+        self._cell_origin[table].append({})
+        self._tables_changed()
+
+    def delete_row(self, table: str, row: int) -> None:
+        """Delete a row. Deleting the last row leaves the table blank."""
+        del self.tables[table][row]
+        del self._cell_origin[table][row]
+        if not self.tables[table]:
+            self.tables[table] = None
+        self._tables_changed()
+
+    def set_not_modelled(self, table: str, not_modelled: bool) -> None:
+        """For a table with no rows: [] (not modelled, current taken as zero)
+        or None (blank: not filled in, needed). No effect on a table with rows."""
+        if self.tables[table]:
+            return
+        new = [] if not_modelled else None
+        if new != self.tables[table]:
+            self.tables[table] = new
+            self._tables_changed()
+
+    def set_table(self, table: str, rows) -> None:
+        """Replace a whole table. *rows* is None (blank), [] (not modelled)
+        or a list of {i_ma, v_min, v_typ, v_max}; numbers or text."""
+        new = None if rows is None else [
+            {key: ("" if row[key] is None else
+                   row[key] if isinstance(row[key], str) else format_number(row[key]))
+             for key in ROW_KEYS} for row in rows]
+        if new != self.tables[table]:
+            self.tables[table] = new
+            self._cell_origin[table] = [{} for _ in new or []]
+            self._tables_changed()
+
+    def _tables_changed(self):
+        self.mark_dirty()
+        self._untick_checked(["diode.table"])
+        self.recalculate()
+        self._fire_fields()
+
+    # ── Parsing ───────────────────────────────────────────────────────────
+
+    def _parse(self):
+        values, problems, unreadable = {}, {}, set()
+        for spec in FIELD_SPECS:
+            raw = self.fields.get(spec.key, "")
+            text = raw.strip()
+            values[spec.key] = None
+            origin = self._origin.get(spec.key)
+            if origin is not None and origin[0] == raw:
+                # Not edited since the file was opened: the value as written
+                values[spec.key] = origin[1]
+                if spec.kind in ("float", "int") and origin[1] is not None:
+                    message = solver.number_problem(spec.dotted, origin[1])
+                    if message is not None:
+                        problems[spec.dotted] = message
+            elif spec.kind == "text":
+                values[spec.key] = raw
+            elif text == "":
+                pass
+            elif spec.kind == "unit":
+                if text in RESISTOR_UNITS:
+                    values[spec.key] = text
+                else:
+                    problems[spec.dotted] = f"unknown unit '{text}' (use Ω, kΩ or MΩ)"
+                    unreadable.add(spec.key)
+            elif spec.kind == "choice":
+                if text in spec.choices:
+                    values[spec.key] = text
+                else:
+                    problems[spec.dotted] = (f"unknown value '{text}' (use "
+                                             + ", ".join(spec.choices) + ")")
+                    unreadable.add(spec.key)
+            elif spec.kind == "bool":
+                if text in ("1", "0"):
+                    values[spec.key] = text == "1"
+                else:
+                    problems[spec.dotted] = f"'{text}' is not on/off"
+                    unreadable.add(spec.key)
+            else:
+                try:
+                    v = float(text)
+                    if not math.isfinite(v):
+                        raise ValueError
+                except ValueError:
+                    problems[spec.dotted] = f"'{text}' is not a number"
+                    unreadable.add(spec.key)
+                    continue
+                if spec.kind == "int":
+                    if not v.is_integer():
+                        problems[spec.dotted] = f"'{text}' is not a whole number"
+                        unreadable.add(spec.key)
+                        continue
+                    v = int(v)
+                elif _WHOLE_NUMBER.fullmatch(text):
+                    v = int(text)       # written as entered: 10 stays 10
+                values[spec.key] = v
+                # Range rules are the solver's (one set for app, file and solver)
+                message = solver.number_problem(spec.dotted, v)
+                if message is not None:
+                    problems[spec.dotted] = message
+
+        for paths, test, message, blame in solver.CROSS_RULES:
+            numbers = [values[PATH_KEYS[p]] for p in paths]
+            if None in numbers or any(p in problems for p in paths):
+                continue
+            if not test(*numbers):
+                for p in blame:
+                    problems[p] = message
+
+        if not {"diode.anode", "diode.cathode"} & unreadable:
+            for name, message in solver.wiring_problems(
+                    values["diode.anode"], values["diode.cathode"]).items():
+                problems[f"clamp_diode.{name}"] = message
+
+        cells, unreadable_cells = {}, set()
+        for table in TABLES:
+            if self.tables[table] is None:      # blank: needed, not a problem
+                cells[table] = None
+                continue
+            rows = []
+            for i, row in enumerate(self.tables[table]):
+                parsed = {}
+                for key in ROW_KEYS:
+                    text = row[key].strip()
+                    parsed[key] = None
+                    origin = self._cell_origin[table][i].get(key)
+                    if origin is not None and origin[0] == row[key]:
+                        parsed[key] = origin[1]         # as written in the file
+                        continue
+                    if text == "":
+                        continue
+                    try:
+                        parsed[key] = float(text)
+                        if not math.isfinite(parsed[key]):
+                            raise ValueError
+                        if _WHOLE_NUMBER.fullmatch(text):
+                            parsed[key] = int(text)
+                    except ValueError:
+                        parsed[key] = math.nan
+                        problems[f"clamp_diode.{table}[{i}].{key}"] = f"'{text}' is not a number"
+                        unreadable_cells.add((table, i, key))
+                rows.append(parsed)
+            cells[table] = rows
+            for where, message in solver.table_problems(rows):
+                problems.setdefault(f"clamp_diode.{table}{where}", message)
+
+        self._values, self._problems = values, problems
+        self._unreadable, self._unreadable_cells = unreadable, unreadable_cells
+        self._cells = cells
+
+    def _file_dict(self) -> dict:
+        """The design in the layout of a .div file. Blank is None. Unreadable
+        text becomes NaN (numbers) or the text itself (units, choices), which
+        the solver treats as present but unusable."""
+        v = self._values
+
+        def leaf(kind, path):
+            if path == "version":
+                return div_format.FORMAT_VERSION
+            if path == "created":
+                return None if self._created is _NEW else self._created
+            if kind == div_format.TABLE:
+                rows = self._cells[path.rsplit(".", 1)[1]]
+                return None if rows is None else [dict(row) for row in rows]
+            key = PATH_KEYS[path]
+            if kind == div_format.TEXT:
+                # Read from the field itself: editing free text does not
+                # recalculate, so the parsed values may be older than it.
+                origin = self._origin.get(key)
+                unedited = origin is not None and origin[0] == self.fields[key]
+                return origin[1] if unedited else self.fields[key]
+            if kind == div_format.FLAG:
+                return bool(v[key])
+            if key in self._unreadable:
+                return math.nan if kind == div_format.NUMBER else self.fields[key].strip()
+            return v[key]
+
+        def walk(schema, prefix):
+            return {key: walk(kind, prefix + key + ".") if isinstance(kind, dict)
+                    else leaf(kind, prefix + key) for key, kind in schema.items()}
+
+        return walk(div_format.SCHEMA, "")
 
     # ── Recalculate ───────────────────────────────────────────────────────
 
     def recalculate(self):
-        self.result = calculate_all(self.resistors, self.zener, self.mcu, self.system)
+        self._parse()
+        self.design = self._file_dict()
+        self.results = solver.solve(self.design)
+        self.circuit = solver.prepare(self.design)
+        self._sweep()
+        self._build_report()
         if self._on_results_changed:
-            self._on_results_changed(self.result)
+            self._on_results_changed(self.results)
 
-    def recalculate_bandwidth(self):
-        self.bw_result = calculate_bandwidth(self.bandwidth_params)
-        if self._on_bandwidth_changed:
-            self._on_bandwidth_changed(self.bw_result)
+    @property
+    def details(self) -> dict:
+        """Every number the screens show besides the checks and levels."""
+        return self.results["details"]
 
-    # ── Serialisation (backwards-compatible .div JSON) ────────────────────
+    def check(self, check_id: str) -> Optional[dict]:
+        """The solver's check with this id; None when the check is not made."""
+        for c in self.results["checks"]:
+            if c["id"] == check_id:
+                return c
+        return None
+
+    def worst_status(self, *check_ids: str) -> Optional[str]:
+        """The worst status among these checks, in the solver's order (FAIL,
+        "needs input", TIGHT, PASS). None when none of them has a status."""
+        checks = [self.check(check_id) for check_id in check_ids]
+        return solver.worst_status(c["status"] for c in checks if c is not None)
+
+    def level(self, level_id: str) -> Optional[dict]:
+        """{"v_in", "typ", "low", "high"} at an input level; None if not given."""
+        return self.results["voltages"]["levels"].get(level_id)
+
+    def info(self, info_id: str) -> Optional[dict]:
+        for row in self.results["info"]:
+            if row["id"] == info_id:
+                return row
+        return None
+
+    # ── Plot: sweep of the solver over the input range ────────────────────
+
+    def _sweep(self):
+        """V_mcu against V_input as plain lists: the typical curve, and the
+        lowest and the highest of the 8 corners (V_mcuL and V_mcuH of the
+        tables). The plot and the tables come from the same function, so
+        they cannot disagree. VIL and VIH are the solver's, passed on.
+
+        The typical curve is the solver's pin_voltage(x, "typ"). The lowest
+        and the highest come from one call to the solver's corners() per
+        point (min and max of its eight voltages): the same values as
+        pin_voltage(x, "low") and pin_voltage(x, "high"), which would each
+        solve the eight corners again.
+
+        plot_unsettled_points is the number of plot points with at least
+        one solve (typical or a corner) that did not settle: a point counts
+        once however many of its solves failed."""
+        c = self.circuit
+        vin_max, vin_min = c.v[solver.VIN_MAX], c.v["system.v_input_min"]
+        typ_block = c.blocked("typ") + [p for p in c.cause[solver.VIN_MAX]
+                                        if p not in c.blocked("typ")]
+        worst_block = c.blocked("worst") + [p for p in c.cause[solver.VIN_MAX]
+                                            if p not in c.blocked("worst")]
+        self.plot_data = {}
+        self.plot_unsettled_points = 0
+        if not typ_block or not worst_block:
+            start = float(min(0.0, vin_min)) if vin_min is not None else 0.0
+            vin_max = float(vin_max)
+            v_in = [start + (vin_max - start) * i / (PLOT_POINTS - 1)
+                    for i in range(PLOT_POINTS)]
+            v_in[-1] = vin_max
+            data = {"v_in": v_in, "vin_min": start, "vin_max": vin_max,
+                    "vdd": c.v[solver.VDD], "v_rec_max": c.v["mcu.v_recommended_max"],
+                    "v_abs_max": c.v["mcu.v_absolute_max"],
+                    "vil": self.results["voltages"]["vil"],
+                    "vih": self.results["voltages"]["vih"]}
+            typ, low, high = [], [], []
+            for x in v_in:
+                solves_not_settled = len(c.unsettled)
+                if not typ_block:
+                    typ.append(c.pin_voltage(x, "typ"))
+                if not worst_block:
+                    volts = [corner["v"] for corner in c.corners(x, "sweep")]
+                    low.append(min(volts))
+                    high.append(max(volts))
+                if len(c.unsettled) > solves_not_settled:
+                    self.plot_unsettled_points += 1     # once per point
+            if not typ_block:
+                data["v_mcu_typ"] = typ
+            if not worst_block:
+                data["v_mcu_low"], data["v_mcu_worst"] = low, high
+            self.plot_data = data
+
+        if typ_block and worst_block:
+            both = typ_block + [p for p in worst_block if p not in typ_block]
+            self.plot_message = "Plot needs input: " + self.describe_paths(both)
+        elif typ_block:
+            self.plot_message = "Typical curve needs input: " + self.describe_paths(typ_block)
+        elif worst_block:
+            self.plot_message = "Worst-case curve needs input: " + self.describe_paths(worst_block)
+        else:
+            self.plot_message = ""
+
+    # ── Missing-input reporting ───────────────────────────────────────────
+
+    @staticmethod
+    def describe_paths(paths) -> str:
+        labels = []
+        for p in paths:
+            label = path_label(p)
+            if label not in labels:
+                labels.append(label)
+        return ", ".join(labels)
+
+    def missing_paths(self, output: str) -> list:
+        """Key paths of the inputs a solver result is waiting for."""
+        return list(self.results["missing"].get(output, []))
+
+    def _build_report(self):
+        rep = InputReport()
+        for p in self.results["needs_input"]:
+            label = path_label(p)
+            if p not in self._problems and label not in rep.needs:
+                rep.needs.append(label)
+
+        def order(path):
+            if path in PATH_KEYS:
+                return (0, FIELD_ORDER[PATH_KEYS[path]], 0, 0)
+            m = _TABLE_PATH.match(path)
+            table, row, cell = m.groups()
+            return (1, TABLES.index(table), -1 if row is None else int(row),
+                    ROW_KEYS.index(cell) if cell in ROW_KEYS else -1)
+        rep.problems = [f"{path_label(p)}: {self._problems[p]}"
+                        for p in sorted(self._problems, key=order)]
+        rep.warnings = list(self.results["warnings"])
+        bad_points = self.plot_unsettled_points
+        if bad_points:
+            rep.warnings.append(
+                f"Clamp diode solver did not settle at {bad_points} plot point(s). "
+                "The curve is not reliable there.")
+        self.report = rep
+
+    def unreadable_fields(self) -> list:
+        """[(label, text)] for every field or table cell whose text can't be read."""
+        out = [(FIELDS[s.key].label, self.fields[s.key]) for s in FIELD_SPECS
+               if s.key in self._unreadable]
+        for table, row, key in sorted(self._unreadable_cells,
+                                      key=lambda c: (TABLES.index(c[0]), c[1],
+                                                     ROW_KEYS.index(c[2]))):
+            out.append((path_label(f"clamp_diode.{table}[{row}].{key}"),
+                        self.tables[table][row][key]))
+        return out
+
+    # ── Serialisation (.div format 2.0) ───────────────────────────────────
 
     def get_data(self) -> dict:
-        """Serialize current state to a dict matching the .div JSON format."""
-        data = {
-            "version": FILE_FORMAT_VERSION,
-            "created": datetime.now().isoformat(),
-            "notes": self.notes,
-            "resistors": {
-                "r1": {
-                    "value": self.r1_display_value,
-                    "unit": self.r1_display_unit,
-                    "rating_mw": self.resistors.r1_rating_mw,
-                    "tolerance_pct": self.resistors.r1_tol_pct,
-                },
-                "r2": {
-                    "value": self.r2_display_value,
-                    "unit": self.r2_display_unit,
-                    "rating_mw": self.resistors.r2_rating_mw,
-                    "tolerance_pct": self.resistors.r2_tol_pct,
-                },
-                "r_series": {
-                    "value": self.rs_display_value,
-                    "unit": self.rs_display_unit,
-                    "rating_mw": self.rs_rating_mw,
-                    "tolerance_pct": self.rs_tol_pct,
-                },
-            },
-            "zener": {
-                "preset": self._zener_preset_name,
-                "vz_nom": self.zener.vz_nom,
-                "vz_min": self.zener.vz_min,
-                "vz_max": self.zener.vz_max,
-                "tolerance_pct": 5,
-                "izt_ma": self.zener.izt_ma,
-                "zzt_typ": self.zener.zzt_typ,
-                "zzt_max": self.zener.zzt_max,
-                "zzk_typ": self.zener.zzk_typ,
-                "zzk_max": self.zener.zzk_max,
-                "izk_ma": self.zener.izk_ma,
-                "ptot_mw": self.zener.ptot_mw,
-            },
-            "mcu": {
-                "vdd": self.mcu.vdd,
-                "vdda": self.mcu.vdd,
-                "vref": self.mcu.vdd,
-                "v_recommended_max": self.mcu.v_recommended_max,
-                "v_absolute_max": self.mcu.v_absolute_max,
-                "safe_injection_ma": self.mcu.safe_injection_ma,
-            },
-            "system": {
-                "v_input_max": self.system.v_input_max,
-                "v_analog_fullscale": self.system.v_analog_fullscale,
-                "v_logic_high_min": self.system.v_logic_high_min,
-                "v_logic_low_max": self.system.v_logic_low_max,
-            },
-        }
-        return data
+        """The current design as a .div format 2.0 dict, with the solver's
+        results. Blank fields are written as null. Raises ValueError on
+        unreadable text."""
+        bad = self.unreadable_fields()
+        if bad:
+            raise ValueError(self._unreadable_message(bad))
+        data = self._file_dict()
+        if self._created is _NEW:       # first save of a new design
+            data["created"] = datetime.now().isoformat()
+        return div_format.with_results(data, self.results)
 
-    # Keep track of which preset was selected (for serialisation)
-    _zener_preset_name: str = "BZB984-C3V3"
+    @staticmethod
+    def _unreadable_message(bad) -> str:
+        items = "\n".join(f"  • {label}: '{text}'" for label, text in bad)
+        return ("These fields contain text that isn't a valid value. "
+                "Fix or clear them before saving:\n" + items)
 
-    def set_zener_preset(self, name: str):
-        self._zener_preset_name = name
+    @staticmethod
+    def parse_file_data(data) -> tuple:
+        """Validate a whole .div dict without touching any state.
 
-    def load_data(self, data: dict):
-        """Deserialize a .div JSON dict into state objects."""
-        self._ignore_changes = True
-        try:
-            r = data.get("resistors", {})
-            r1 = r.get("r1", {})
-            r2 = r.get("r2", {})
-            rs = r.get("r_series", {})
+        Returns (fields, tables, value_problems, origins). Raises LoadError listing
+        every format problem (wrong version, missing or unknown key, wrong
+        type, unknown unit ...), each starting with its key path. Values
+        that are readable but unusable (out of range, table rows out of
+        order) load as they are and are returned as value_problems; null
+        loads blank.
+        """
+        problems = div_format.validate(data)
+        broken = [p for p in problems if p.kind == div_format.FORMAT]
+        if broken:
+            raise LoadError("\n".join(str(p) for p in broken))
 
-            def _val_ohms(d, default_val, default_unit):
-                v = d.get("value", default_val)
-                u = d.get("unit", default_unit)
-                if v is None:
-                    v = 0
-                return float(v) * (1000 if u == "k\u03a9" else 1)
+        def shown(raw):
+            return "" if raw is None else raw if isinstance(raw, str) else format_number(raw)
 
-            self.r1_display_value = float(r1.get("value", 10))
-            self.r1_display_unit = r1.get("unit", "k\u03a9")
-            self.resistors.r1_ohms = _val_ohms(r1, 10, "k\u03a9")
-            self.resistors.r1_rating_mw = r1.get("rating_mw")
-            self.resistors.r1_tol_pct = float(r1.get("tolerance_pct", 1))
+        fields, origin = {}, {}
+        for spec in FIELD_SPECS:
+            raw = solver.lookup(data, spec.dotted)
+            fields[spec.key] = ("1" if raw else "0") if spec.kind == "bool" else shown(raw)
+            origin[spec.key] = (fields[spec.key], raw)
+        tables, cell_origin = {}, {}
+        for table in TABLES:
+            rows = data["clamp_diode"][table]
+            # null stays blank (not filled in); [] stays "not modelled"
+            tables[table] = None if rows is None else [
+                {key: shown(row[key]) for key in ROW_KEYS} for row in rows]
+            cell_origin[table] = [{key: (shown(row[key]), row[key]) for key in ROW_KEYS}
+                                  for row in rows or []]
+        origins = {"fields": origin, "cells": cell_origin, "created": data["created"]}
+        return fields, tables, [p for p in problems if p.kind == div_format.VALUE], origins
 
-            self.r2_display_value = float(r2.get("value", 18))
-            self.r2_display_unit = r2.get("unit", "k\u03a9")
-            self.resistors.r2_ohms = _val_ohms(r2, 18, "k\u03a9")
-            self.resistors.r2_rating_mw = r2.get("rating_mw")
-            self.resistors.r2_tol_pct = float(r2.get("tolerance_pct", 1))
-
-            self.rs_display_value = float(rs.get("value", 0))
-            self.rs_display_unit = rs.get("unit", "\u03a9")
-            self.resistors.rs_ohms = _val_ohms(rs, 0, "\u03a9")
-            self.rs_rating_mw = rs.get("rating_mw")
-            self.rs_tol_pct = rs.get("tolerance_pct")
-
-            z = data.get("zener", {})
-            self._zener_preset_name = z.get("preset", "Custom")
-            self.zener.vz_nom = float(z.get("vz_nom", 3.3))
-            self.zener.vz_min = float(z.get("vz_min", 3.1))
-            self.zener.vz_max = float(z.get("vz_max", 3.5))
-            self.zener.izt_ma = float(z.get("izt_ma", 5))
-            self.zener.zzt_typ = float(z.get("zzt_typ", 85))
-            self.zener.zzt_max = float(z.get("zzt_max", 95))
-            self.zener.zzk_typ = float(z.get("zzk_typ", 350))
-            self.zener.zzk_max = float(z.get("zzk_max", 600))
-            self.zener.izk_ma = float(z.get("izk_ma", 1))
-            self.zener.ptot_mw = float(z.get("ptot_mw", 265))
-
-            m = data.get("mcu", {})
-            self.mcu.vdd = float(m.get("vdd", 3.3))
-            self.mcu.v_recommended_max = float(m.get("v_recommended_max", 3.6))
-            self.mcu.v_absolute_max = float(m.get("v_absolute_max", 4.0))
-            self.mcu.safe_injection_ma = float(m.get("safe_injection_ma", 1.0))
-
-            s = data.get("system", {})
-            self.system.v_input_max = float(s.get("v_input_max", 30))
-            self.system.v_analog_fullscale = float(s.get("v_analog_fullscale", 5.1))
-            self.system.v_logic_high_min = float(s.get("v_logic_high_min", 3.8))
-            self.system.v_logic_low_max = float(s.get("v_logic_low_max", 1.0))
-
-            self.notes = data.get("notes", "")
-        finally:
-            self._ignore_changes = False
-
-    def reset_to_defaults(self):
-        """Reset state to factory defaults."""
-        defs = DEFAULT_VALUES
-        self.load_data({
-            "resistors": defs["resistors"],
-            "zener": defs["zener"],
-            "mcu": defs["mcu"],
-            "system": defs["system"],
-            "notes": "",
-        })
+    def load_data(self, data: dict) -> list:
+        """Validate *data* fully, then replace the design with it. Stored
+        results are ignored: the design is solved again. Returns load
+        warnings. On LoadError nothing has changed."""
+        fields, tables, value_problems, origins = self.parse_file_data(data)
+        with self.suspend_changes():
+            self.fields, self.tables = fields, tables
+            self._origin, self._cell_origin = origins["fields"], origins["cells"]
+            self._created = origins["created"]
+            self.recalculate()
+            self._fire_fields()
+        warnings = []
+        if self.report.needs:
+            warnings.append("These values are blank in the file and results need them:\n"
+                            + ", ".join(self.report.needs))
+        if value_problems:
+            warnings.append("These values in the file can't be used (they are listed "
+                            "after \"Fix:\"):\n"
+                            + "\n".join(f"  • {p}" for p in value_problems))
+        return warnings
 
     # ── File operations ───────────────────────────────────────────────────
 
     def save_to_file(self, filepath: str) -> bool:
+        """Save atomically (temp file + replace). On failure returns False and
+        sets last_save_error; the existing file is untouched."""
+        self.last_save_error = None
         try:
             data = self.get_data()
-            with open(filepath, "w") as f:
-                json.dump(data, f, indent=2)
-            self.current_file = filepath
-            self.is_dirty = False
-            self._fire_title()
-            return True
-        except Exception:
+        except ValueError as e:
+            self.last_save_error = str(e)
             return False
-
-    def open_file(self, filepath: str) -> dict:
-        """Load file and return raw data dict (caller pushes to UI)."""
-        with open(filepath, "r") as f:
-            data = json.load(f)
-        self.load_data(data)
+        try:
+            div_format.write_json(filepath, data)
+        except Exception as e:
+            self.last_save_error = f"Failed to save {filepath}:\n{e}"
+            return False
+        self._created = data["created"]
         self.current_file = filepath
         self.is_dirty = False
         self._fire_title()
-        return data
+        return True
+
+    def open_file(self, filepath: str) -> list:
+        """Load a .div file. Returns load warnings.
+        Raises LoadError; on error the current design, file name and unsaved
+        flag are unchanged."""
+        try:
+            data = div_format.read_json(filepath)
+        except DivError as e:
+            raise LoadError(str(e)) from None
+        warnings = self.load_data(data)
+        self.current_file = filepath
+        self.is_dirty = False
+        self._fire_title()
+        return warnings
 
     def file_new(self):
-        self.current_file = None
-        self.is_dirty = False
-        self.reset_to_defaults()
+        """Blank design (bandwidth fields get their visible starting values)."""
+        with self.suspend_changes():
+            self._reset_fields()
+            self.current_file = None
+            self.is_dirty = False
+            self.recalculate()
+            self._fire_fields()
         self._fire_title()

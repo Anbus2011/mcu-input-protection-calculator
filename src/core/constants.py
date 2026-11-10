@@ -1,107 +1,38 @@
 """
-Constants for the Resistor Divider Calculator.
-Zener presets, ADC reference tables, and application-wide constants.
+Constants for the MCU Input Protection Calculator.
+
+There are no part presets here: every clamp diode and MCU value comes from
+the .div file or from the user typing it.
 """
+from src.core.div_format import FORMAT_VERSION
+from src.models.clamp_solver import RESISTOR_UNITS  # noqa: F401  (re-exported)
 
 # ============================================================================
-# ZENER PRESETS - BZB984 Series (Nexperia Rev.3 Dec 2022)
+# RESISTOR UNITS
 # ============================================================================
-ZENER_PRESETS = {
-    "BZB984-C3V0": {
-        "vz_nom": 3.0, "vz_min": 2.8, "vz_max": 3.2, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 80, "zzt_max": 95,
-        "zzk_typ": 325, "zzk_max": 600, "izk_ma": 1, "ptot_mw": 265
-    },
-    "BZB984-C3V3": {
-        "vz_nom": 3.3, "vz_min": 3.1, "vz_max": 3.5, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 85, "zzt_max": 95,
-        "zzk_typ": 350, "zzk_max": 600, "izk_ma": 1, "ptot_mw": 265
-    },
-    "BZB984-C3V6": {
-        "vz_nom": 3.6, "vz_min": 3.4, "vz_max": 3.8, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 85, "zzt_max": 90,
-        "zzk_typ": 375, "zzk_max": 600, "izk_ma": 1, "ptot_mw": 265
-    },
-    "BZB984-C3V9": {
-        "vz_nom": 3.9, "vz_min": 3.7, "vz_max": 4.1, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 85, "zzt_max": 90,
-        "zzk_typ": 400, "zzk_max": 600, "izk_ma": 1, "ptot_mw": 265
-    },
-    "BZB984-C4V3": {
-        "vz_nom": 4.3, "vz_min": 4.0, "vz_max": 4.6, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 80, "zzt_max": 90,
-        "zzk_typ": 410, "zzk_max": 600, "izk_ma": 1, "ptot_mw": 265
-    },
-    "BZB984-C4V7": {
-        "vz_nom": 4.7, "vz_min": 4.4, "vz_max": 5.0, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 50, "zzt_max": 80,
-        "zzk_typ": 425, "zzk_max": 500, "izk_ma": 1, "ptot_mw": 265
-    },
-    "BZB984-C5V1": {
-        "vz_nom": 5.1, "vz_min": 4.8, "vz_max": 5.4, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 40, "zzt_max": 60,
-        "zzk_typ": 400, "zzk_max": 480, "izk_ma": 1, "ptot_mw": 265
-    },
-    "BZB984-C5V6": {
-        "vz_nom": 5.6, "vz_min": 5.2, "vz_max": 6.0, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 15, "zzt_max": 40,
-        "zzk_typ": 80, "zzk_max": 400, "izk_ma": 1, "ptot_mw": 265
-    },
-    "BZB984-C6V2": {
-        "vz_nom": 6.2, "vz_min": 5.8, "vz_max": 6.6, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 6, "zzt_max": 10,
-        "zzk_typ": 40, "zzk_max": 150, "izk_ma": 1, "ptot_mw": 265
-    },
-    "Custom": {
-        "vz_nom": 3.3, "vz_min": 3.1, "vz_max": 3.5, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 85, "zzt_max": 95,
-        "zzk_typ": 350, "zzk_max": 600, "izk_ma": 1, "ptot_mw": 265
-    }
+# Units shown in the unit selectors of a new, blank design (visible, and they
+# have no effect until a value is typed).
+NEW_DESIGN_UNITS = {"r1": "kΩ", "r2": "kΩ", "rs": "Ω"}
+
+# ============================================================================
+# SIGNAL BANDWIDTH STARTING VALUES
+# ============================================================================
+# These are the only values the app ever puts in a field by itself: a new
+# design starts with them in the Signal Bandwidth fields, and the
+# "Fill from starting values" button puts them back into blank or unreadable
+# bandwidth fields. They are always visible in the fields. Every other input
+# starts blank.
+BANDWIDTH_STARTING_VALUES = {
+    # Engineering estimate for a short PCB trace (2-5 pF typical); no datasheet source
+    "c_stray_pf": 3,
+    # owner's example, 2026-11-09: 1 MHz reliable, 1.5 MHz may work
+    "margin_factor": 1.5,
 }
 
 # ============================================================================
-# ADC SAMPLE TIME REFERENCE (STM32G4)
+# PLOT
 # ============================================================================
-ADC_SAMPLE_THRESHOLDS = [
-    (1000,   2.5),
-    (5000,   6.5),
-    (10000,  12.5),
-    (20000,  24.5),
-    (40000,  47.5),
-]
-ADC_SAMPLE_DEFAULT = 247.5
-
-# ============================================================================
-# APPLICATION DEFAULTS
-# ============================================================================
-DEFAULT_VALUES = {
-    "resistors": {
-        "r1": {"value": 10, "unit": "k\u03a9", "rating_mw": 200, "tolerance_pct": 1},
-        "r2": {"value": 18, "unit": "k\u03a9", "rating_mw": 100, "tolerance_pct": 1},
-        "r_series": {"value": 0, "unit": "\u03a9", "rating_mw": None, "tolerance_pct": None},
-    },
-    "zener": {
-        "preset": "BZB984-C3V3",
-        "vz_nom": 3.3, "vz_min": 3.1, "vz_max": 3.5, "tolerance_pct": 5,
-        "izt_ma": 5, "zzt_typ": 85, "zzt_max": 95,
-        "zzk_typ": 350, "zzk_max": 600, "izk_ma": 1, "ptot_mw": 265,
-    },
-    "mcu": {
-        "vdd": 3.3, "vdda": 3.3, "vref": 3.3,
-        "v_recommended_max": 3.6, "v_absolute_max": 4.0,
-        "safe_injection_ma": 1.0,
-    },
-    "system": {
-        "v_input_max": 30, "v_analog_fullscale": 5.1,
-        "v_logic_high_min": 3.8, "v_logic_low_max": 1.0,
-    },
-    "bandwidth": {
-        "r_series_bw": 100, "c_diode_pf": 95, "c_pin_pf": 10, "c_stray_pf": 3,
-        "vil": 0.99, "vih": 2.31,
-        "f_peripheral_mhz": 170, "n_samples": 3,
-        "counter_bits": 16, "counter_signed": False, "f_read_hz": 1000,
-    },
-}
+PLOT_POINTS = 200
 
 # ============================================================================
 # SVG ICON (Resistor symbol)
@@ -116,4 +47,4 @@ RESISTOR_SVG = '''<?xml version="1.0" encoding="UTF-8"?>
 </svg>'''
 
 APP_VERSION = "1.1"
-FILE_FORMAT_VERSION = "1.0"
+FILE_FORMAT_VERSION = FORMAT_VERSION

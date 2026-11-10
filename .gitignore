@@ -25,4 +25,11 @@ Desktop.ini
 
 # Design files (user data)
 *.div
-!results.div
+!examples/*.div
+
+# Datasheets (local reference copies, not redistributed)
+docs/*.pdf
+datasheets/
+
+# Screenshots of the app (local, regenerated when the screens change)
+docs/screenshots/

@@ -1,14 +1,19 @@
 """
 Test suite for file I/O and state serialisation.
-Verifies .div file round-trip and backwards compatibility.
+Verifies .div format 2.0 round-trip and the handling of other files.
 Run with: python -m pytest tests/ -v
 """
+import copy
 import json
 import os
 import tempfile
+
 import pytest
 
-from src.core.app_state import AppState
+from src.core.app_state import AppState, LoadError
+from tests.designs import V1_FILE, blank_design, zener_reference
+
+EXAMPLES = os.path.join(os.path.dirname(__file__), "..", "examples")
 
 
 class TestFileRoundTrip:
@@ -16,26 +21,18 @@ class TestFileRoundTrip:
 
     def test_save_and_reload(self):
         s = AppState()
-        s.resistors.r1_ohms = 4700
-        s.resistors.r2_ohms = 20000
-        s.resistors.rs_ohms = 100
-        s.resistors.r1_tol_pct = 2.0
-        s.resistors.r2_tol_pct = 0.5
-        s.resistors.r1_rating_mw = 250
-        s.resistors.r2_rating_mw = 125
-        s.r1_display_value = 4.7
-        s.r1_display_unit = "k\u03a9"
-        s.r2_display_value = 20.0
-        s.r2_display_unit = "k\u03a9"
-        s.rs_display_value = 100
-        s.rs_display_unit = "\u03a9"
-        s.zener.vz_nom = 5.1
-        s.zener.vz_min = 4.8
-        s.zener.vz_max = 5.4
-        s.mcu.vdd = 5.0
-        s.mcu.v_absolute_max = 6.0
-        s.system.v_input_max = 24
-        s.notes = "Test round-trip"
+        s.set_fields({
+            "r1.value": "4.7", "r1.unit": "kΩ", "r1.tol": "2.0", "r1.rating": "250",
+            "r2.value": "20.0", "r2.unit": "kΩ", "r2.tol": "0.5", "r2.rating": "125",
+            "rs.value": "100", "rs.unit": "Ω",
+            "diode.part": "BZX84-C5V1", "diode.type": "zener",
+            "diode.anode": "gnd", "diode.cathode": "node", "diode.ptot_mw": "250",
+            "mcu.vdd": "5.0", "mcu.v_absolute_max": "6.0",
+            "system.v_input_max": "24",
+            "notes": "Test round-trip",
+        })
+        s.set_table("reverse", [dict(i_ma=1, v_min=4.6, v_typ=4.9, v_max=5.2),
+                                dict(i_ma=5, v_min=4.8, v_typ=5.1, v_max=5.4)])
 
         with tempfile.NamedTemporaryFile(suffix=".div", delete=False, mode="w") as f:
             path = f.name
@@ -46,26 +43,27 @@ class TestFileRoundTrip:
             s2 = AppState()
             s2.open_file(path)
 
-            assert s2.resistors.r1_ohms == 4700
-            assert s2.resistors.r2_ohms == 20000
-            assert s2.resistors.rs_ohms == 100
-            assert s2.resistors.r1_tol_pct == 2.0
-            assert s2.resistors.r2_tol_pct == 0.5
-            assert s2.zener.vz_nom == 5.1
-            assert s2.zener.vz_max == 5.4
-            assert s2.mcu.vdd == 5.0
-            assert s2.system.v_input_max == 24
+            ohms = s2.circuit.v
+            assert ohms["resistors.r1"] == 4700
+            assert ohms["resistors.r2"] == 20000
+            assert ohms["resistors.r_series"] == 100
+            assert ohms["resistors.r1.tolerance_pct"] == 2.0
+            assert ohms["resistors.r2.tolerance_pct"] == 0.5
+            assert s2.fields["diode.part"] == "BZX84-C5V1"
+            assert s2.design["clamp_diode"]["reverse"][1]["v_typ"] == 5.1
+            assert s2.design["clamp_diode"]["reverse"][1]["v_max"] == 5.4
+            assert s2.design["mcu"]["vdd"] == 5.0
+            assert s2.design["system"]["v_input_max"] == 24
             assert s2.notes == "Test round-trip"
+            assert s2.tables == s.tables
+            assert s2.results == s.results
         finally:
             os.unlink(path)
 
     def test_json_format_version(self):
-        """Saved file must contain version 1.0 for backwards compat."""
+        """Saved file must contain version 2.0 and the format 2.0 sections."""
         s = AppState()
-        s.r1_display_value = 10
-        s.r1_display_unit = "k\u03a9"
-        s.r2_display_value = 18
-        s.r2_display_unit = "k\u03a9"
+        s.set_fields({"r1.value": "10", "r2.value": "18"})
 
         with tempfile.NamedTemporaryFile(suffix=".div", delete=False, mode="w") as f:
             path = f.name
@@ -74,54 +72,65 @@ class TestFileRoundTrip:
             s.save_to_file(path)
             with open(path) as f:
                 data = json.load(f)
-            assert data["version"] == "1.0"
+            assert data["version"] == "2.0"
             assert "resistors" in data
-            assert "zener" in data
+            assert "clamp_diode" in data and "zener" not in data
             assert "mcu" in data
             assert "system" in data
+            assert "bandwidth" in data and "results" in data
         finally:
             os.unlink(path)
 
 
-class TestBackwardsCompatibility:
-    """Verify loading old-format .div files still works."""
+class TestOtherFiles:
+    """Rewritten: there is no backwards compatibility with format 1.0."""
 
-    def test_load_results_div(self):
-        """Load the shipped results.div and verify key values."""
-        path = os.path.join(os.path.dirname(__file__), "..", "results.div")
-        if not os.path.exists(path):
-            pytest.skip("results.div not found")
-
+    def test_load_example_file(self):
+        """Load a shipped example and verify key values."""
+        path = os.path.join(EXAMPLES, "zener_gnd_bzb984_c3v3.div")
         s = AppState()
-        s.open_file(path)
+        assert s.open_file(path) == []
 
-        assert s.resistors.r1_ohms == 8200
-        assert s.resistors.r2_ohms == 29000
-        assert s.zener.vz_nom == 3.3
-        assert s.mcu.vdd == 3.3
-        assert s.system.v_input_max == 30
+        assert s.circuit.v["resistors.r1"] == 10000
+        assert s.circuit.v["resistors.r2"] == 18000
+        assert s.fields["diode.part"] == "BZB984-C3V3"
+        assert len(s.tables["reverse"]) == 13 and s.tables["forward"] == []
+        assert s.design["mcu"]["vdd"] == 3.3
+        assert s.design["system"]["v_input_max"] == 30
+        assert not s.is_dirty
 
-    def test_missing_fields_use_defaults(self):
-        """A minimal .div file should load without errors."""
-        minimal = {
-            "version": "1.0",
-            "resistors": {
-                "r1": {"value": 10, "unit": "k\u03a9"},
-                "r2": {"value": 18, "unit": "k\u03a9"},
-            },
-        }
+    def test_format_1_file_is_refused_with_a_clear_message(self, tmp_path):
+        path = tmp_path / "old.div"
+        path.write_text(json.dumps(copy.deepcopy(V1_FILE)), encoding="utf-8")
+        s = AppState()
+        with pytest.raises(LoadError) as exc:
+            s.open_file(str(path))
+        message = str(exc.value)
+        assert message.startswith("version: this is a format 1.0 file")
+        assert "reads .div format 2.0 only" in message and "no converter" in message
+        assert s.current_file is None and s.fields["r1.value"] == ""
+
+    def test_blank_values_load_blank_with_one_warning(self):
+        """A file whose values are null loads without errors. Nothing is
+        filled in: blank stays blank, and one warning lists what the results
+        need. (A file with keys left out is refused: see test_app_state.)"""
+        data = blank_design()
+        data["resistors"]["r1"].update(value=10, unit="kΩ")
+        data["resistors"]["r2"].update(value=18, unit="kΩ")
         with tempfile.NamedTemporaryFile(suffix=".div", delete=False, mode="w") as f:
-            json.dump(minimal, f)
+            json.dump(data, f)
             path = f.name
 
         try:
             s = AppState()
-            s.open_file(path)
-            assert s.resistors.r1_ohms == 10000
-            assert s.resistors.r2_ohms == 18000
-            # Defaults should fill in
-            assert s.zener.vz_nom == 3.3
-            assert s.mcu.vdd == 3.3
+            warnings = s.open_file(path)
+            assert s.circuit.v["resistors.r1"] == 10000
+            assert s.circuit.v["resistors.r2"] == 18000
+            assert s.design["mcu"]["vdd"] is None
+            assert s.fields["mcu.vdd"] == "" and s.fields["diode.ptot_mw"] == ""
+            assert s.fields["bw.c_stray_pf"] == ""       # not even a starting value
+            assert len(warnings) == 1
+            assert "VDD/VDDA" in warnings[0] and "Anode connection" in warnings[0]
         finally:
             os.unlink(path)
 
@@ -138,10 +147,7 @@ class TestDirtyTracking:
 
     def test_save_clears_dirty(self):
         s = AppState()
-        s.r1_display_value = 10
-        s.r1_display_unit = "k\u03a9"
-        s.r2_display_value = 18
-        s.r2_display_unit = "k\u03a9"
+        s.set_fields({"r1.value": "10", "r2.value": "18"})
         s.mark_dirty()
 
         with tempfile.NamedTemporaryFile(suffix=".div", delete=False, mode="w") as f:
