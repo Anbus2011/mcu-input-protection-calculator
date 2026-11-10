@@ -1,0 +1,97 @@
+{
+  "version": "2.0",
+  "created": "2026-11-09",
+  "notes": "Verification baseline: 10k / 18k divider, 30 V in, Zener to GND.",
+  "resistors": {
+    "r1": {"value": 10, "unit": "k\u03a9", "rating_mw": 200, "tolerance_pct": 1},
+    "r2": {"value": 18, "unit": "k\u03a9", "rating_mw": 100, "tolerance_pct": 1},
+    "r_series": {"value": 0, "unit": "\u03a9", "rating_mw": null, "tolerance_pct": null}
+  },
+  "clamp_diode": {
+    "part": "BZB984-C3V3",
+    "source": "Nexperia BZB984 series Rev 3: Fig. 7, Tables 5, 7 and 8",
+    "checked": false,
+    "note": "reverse: v_typ is Fig. 7 (typical working voltage against current, Tj = 25 C), read from the graph to about +/-0.02 V. v_min = v_typ - 0.18 V and v_max = v_typ + 0.22 V in every row. Those are the offsets at 5 mA, the one current where the data sheet gives limits: Table 8 has VZ 3.10 V min and 3.50 V max at IZ = 5 mA, and Fig. 7 reads 3.28 V there. The data sheet gives no limits at other currents, so the same two offsets are used for all rows. 25 C only, no temperature spread. Table 8 IR max (5 uA at VR = 1 V) is leakier than v_min here (about 1.3 uA at 1 V) and is not folded in. forward: empty, not modelled (Table 7 gives one point, VF max 0.9 V at 10 mA). capacitance: Cd max at VR = 0 V, 1 MHz (Table 8). ptot: one diode loaded, Tamb <= 25 C (Table 5).",
+    "type": "zener",
+    "anode": "gnd",
+    "cathode": "node",
+    "capacitance_pf": 450,
+    "ptot_mw": 265,
+    "forward": [],
+    "reverse": [
+      {"i_ma": 0.001, "v_min": 0.96, "v_typ": 1.14, "v_max": 1.36},
+      {"i_ma": 0.002, "v_min": 1.07, "v_typ": 1.25, "v_max": 1.47},
+      {"i_ma": 0.005, "v_min": 1.23, "v_typ": 1.41, "v_max": 1.63},
+      {"i_ma": 0.01, "v_min": 1.35, "v_typ": 1.53, "v_max": 1.75},
+      {"i_ma": 0.02, "v_min": 1.49, "v_typ": 1.67, "v_max": 1.89},
+      {"i_ma": 0.05, "v_min": 1.69, "v_typ": 1.87, "v_max": 2.09},
+      {"i_ma": 0.1, "v_min": 1.85, "v_typ": 2.03, "v_max": 2.25},
+      {"i_ma": 0.2, "v_min": 2.03, "v_typ": 2.21, "v_max": 2.43},
+      {"i_ma": 0.5, "v_min": 2.29, "v_typ": 2.47, "v_max": 2.69},
+      {"i_ma": 1, "v_min": 2.51, "v_typ": 2.69, "v_max": 2.91},
+      {"i_ma": 2, "v_min": 2.75, "v_typ": 2.93, "v_max": 3.15},
+      {"i_ma": 5, "v_min": 3.1, "v_typ": 3.28, "v_max": 3.5},
+      {"i_ma": 10, "v_min": 3.37, "v_typ": 3.55, "v_max": 3.77}
+    ]
+  },
+  "mcu": {
+    "part": "STM32G484 (TT_xx pin)",
+    "source": "ST DS12983 Rev 5: Tables 14, 15, 17, 54 and 84",
+    "checked": false,
+    "note": "TT_xx pin. Safe Max = VDD + 0.3 V (Table 17, VIN). Abs. Max 4.0 V and pin minimum VSS - 0.3 V (Table 14). VIL 0.3 x VDD, VIH 0.7 x VDD and CIO 5 pF typ (Table 54). Minimum pulse width: 3 x tTIMxCLK at 170 MHz (Table 84, tW(TI1,TI2), directional clock x1). ADC: 12 bit.",
+    "pin_type": "TT",
+    "vdd": 3.3,
+    "v_recommended_max": 3.6,
+    "v_absolute_max": 4.0,
+    "v_pin_min": -0.3,
+    "adc_bits": 12,
+    "vil_factor": 0.3,
+    "vih_factor": 0.7,
+    "c_pin_pf": 5,
+    "t_pulse_min_ns": 17.65
+  },
+  "system": {
+    "v_input_max": 30,
+    "v_input_min": null,
+    "v_analog_fullscale": 5.1,
+    "analog_error_allowed_pct": null,
+    "v_logic_high_min": 3.8,
+    "v_logic_low_max": 1.0,
+    "v_touch": null,
+    "f_required_hz": null
+  },
+  "bandwidth": {"c_stray_pf": 3, "margin_factor": 1.5},
+  "results": {
+    "solver_version": "2.0.0",
+    "verdict": "FAIL",
+    "checks": [
+      {"id": "pin_max_safe", "status": "PASS", "value": 3.239031, "limit": 3.6, "unit": "V"},
+      {"id": "pin_max_abs", "status": "PASS", "value": 3.239031, "limit": 4.0, "unit": "V"},
+      {"id": "logic_high", "status": "FAIL", "value": 1.831184, "limit": 2.31, "unit": "V"},
+      {"id": "logic_low", "status": "PASS", "value": 0.647364, "limit": 0.99, "unit": "V"},
+      {"id": "power_r1", "status": "PASS", "value": 74.46949, "limit": 200.0, "unit": "mW"},
+      {"id": "power_r2", "status": "PASS", "value": 0.588545, "limit": 100.0, "unit": "mW"},
+      {"id": "power_diode", "status": "PASS", "value": 8.178435, "limit": 265.0, "unit": "mW"},
+      {"id": "analog_range", "status": "PASS", "value": 2.352128, "limit": 3.3, "unit": "V"},
+      {"id": "analog_error", "status": null, "value": -38.27508, "limit": null, "unit": "%"}
+    ],
+    "info": [
+      {"id": "f_may_work", "value": null, "unit": "Hz"},
+      {"id": "f_reliable", "value": null, "unit": "Hz"}
+    ],
+    "voltages": {
+      "vil": 0.99,
+      "vih": 2.31,
+      "levels": {
+        "zero": {"v_in": 0.0, "typ": 0.0, "low": 0.0, "high": 0.0},
+        "logic_low": {"v_in": 1.0, "typ": 0.6425773, "low": 0.6374079, "high": 0.647364},
+        "logic_high": {"v_in": 3.8, "typ": 1.96266, "low": 1.831184, "high": 2.110306},
+        "analog_fullscale": {"v_in": 5.1, "typ": 2.171218, "low": 2.01905, "high": 2.352128},
+        "max_input": {"v_in": 30.0, "typ": 3.019829, "low": 2.839758, "high": 3.239031}
+      }
+    },
+    "needs_input": [],
+    "notes": ["The pin never reads high: its lowest voltage at the Logic High input, 1.831 V, does not get above VIH 2.310 V."],
+    "warnings": []
+  }
+}

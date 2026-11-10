@@ -46,10 +46,10 @@ The skill is not built yet. It will be a Claude skill that designs the protectio
 - the part-number search, through a distributor's parts search, done only after the resistor specification is agreed.
 
 **Rules:**
-- The script does all the math. Chat never retypes a number: tables and plots are shown as the script printed them.
+- The solver does all the math, through the server. Chat never retypes a number: tables are shown as `solve_div` returned them and plots as `plot_div` drew them.
 - Nothing is guessed. A value the skill can't source is written as `null` and shows as "needs input".
 - Every data-sheet value is cited in `source` and `note` (document number, revision, table or figure), and the section is written with `checked: false`.
-- Before designing, the skill runs `divcheck.py` on both files in `examples/` and stops if the results differ from the stored ones.
+- Before designing, the skill solves both example files through `solve_div` and stops if the results differ from their stored results. It uses its own copies in `skill/examples/`; a test fails if they differ from `examples/`.
 - The skill has its own version number and states the `SOLVER_VERSION` it was written and tested for. If the server reports a different `SOLVER_VERSION`, the skill stops and says the skill may need updating. Every `.div` carries `SOLVER_VERSION` in its `results`, and the skill writes its own version, the solver version and the server's commit in the file's `notes` and in its report (format 2.0 has no key for them).
 - A check the solver doesn't make (for example resistor derating at temperature, or the board's minimum rail load) is reported as done by the skill or as not checked, never as PASS.
 - `rating_mw` in the `.div` is the data-sheet rating as stated. Derating to the check temperature is the skill's own check, in its report.
@@ -81,5 +81,5 @@ The skill is not built yet. It will be a Claude skill that designs the protectio
 
 ## 5. Next work
 
-1. Build the skill in `skill/`: the MCP server, its tests (both files in `examples/` solved through the server's tools give their stored results), and `SKILL.md`. Then test the installed skill live in a Claude chat.
+1. Finish the skill in `skill/`. The MCP server and its tests are done (`skill/server.py`, `tests/test_mcp_server.py`: both files in `examples/` solved through the server's tools give their stored results). Still to do: write `SKILL.md`, register the server in Claude Desktop, then test the installed skill live in a Claude chat.
 2. The first real design, made with the skill: the user inputs of a dual-channel motor controller. Its requirements are kept with that board's project, not in this repository.

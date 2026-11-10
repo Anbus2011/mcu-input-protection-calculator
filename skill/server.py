@@ -51,13 +51,15 @@ HTTP_HOST = "127.0.0.1"         # --host when it is not given
 HTTP_PORT = 8000                # --port when it is not given
 SUMMARY_NAME = "design.div"     # first line of the summary when no name is given
 GIT_TIMEOUT_S = 10
+BYTE_ORDER_MARK = chr(0xFEFF)
 
 INSTRUCTIONS = (
     "Solves a .div design file (format 2.0): one MCU input pin behind a "
     "resistor divider and one clamp diode. Send the whole file as JSON text. "
     "solve_div validates it, solves it and returns it with \"results\" filled "
     "in; plot_div draws pin voltage against input voltage; solver_info gives "
-    "the solver version, the format version and the commit. The server does "
+    "the solver version, the format version, the commit and whether the "
+    "server's folder had uncommitted changes. The server does "
     "no math of its own, chooses no values and reads or writes no files.")
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False,
@@ -66,21 +68,39 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False,
 
 # ── The commit the server is running ─────────────────────────────────────────
 
-@functools.lru_cache(maxsize=1)
-def _commit() -> tuple:
-    """(commit, reason): `git rev-parse HEAD` in the repository folder, read
-    once (main() reads it at start, so it is the commit of the code that was
-    loaded). When git can't give it: (None, why)."""
+def _git(*args) -> tuple:
+    """(output, reason) of `git <args>` run in the repository folder. When
+    git can't answer: (None, why). git never gets the server's stdin, which
+    over stdio is the protocol."""
     try:
-        run = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO,
+        run = subprocess.run(["git", *args], cwd=REPO,
                              stdin=subprocess.DEVNULL, capture_output=True,
                              text=True, timeout=GIT_TIMEOUT_S)
     except (OSError, subprocess.SubprocessError) as e:
         return None, f"git could not be run: {e}"
     if run.returncode != 0:
-        return None, ("git rev-parse HEAD failed: "
+        return None, (f"git {' '.join(args)} failed: "
                       + (run.stderr.strip() or f"exit code {run.returncode}"))
-    return run.stdout.strip(), None
+    return run.stdout, None
+
+
+@functools.lru_cache(maxsize=1)
+def _commit() -> tuple:
+    """(commit, reason): `git rev-parse HEAD`, read once (main() reads it at
+    start, so it is the commit of the code that was loaded). When git can't
+    give it: (None, why)."""
+    output, reason = _git("rev-parse", "HEAD")
+    return (None if output is None else output.strip()), reason
+
+
+@functools.lru_cache(maxsize=1)
+def _dirty() -> tuple:
+    """(dirty, reason): True when `git status --porcelain` lists anything (a
+    changed, staged or untracked file), so the code that runs is not exactly
+    the commit. Read once, at start, like the commit. When git can't say:
+    (None, why)."""
+    output, reason = _git("status", "--porcelain")
+    return (None if output is None else bool(output.strip())), reason
 
 
 def _stamp() -> dict:
@@ -96,7 +116,7 @@ def _load(div_json: str) -> tuple:
     the text is not JSON. A byte order mark is dropped, as it is when
     divcheck.py reads a file."""
     try:
-        data = parse_json(div_json.removeprefix("﻿"))
+        data = parse_json(div_json.removeprefix(BYTE_ORDER_MARK))
         problems = validate(data)
     except DivError as e:
         data, problems = None, e.problems
@@ -118,14 +138,20 @@ def solver_info() -> dict[str, Any]:
     """Versions of what this server runs. Read-only.
 
     Returns solver_version (the solver's SOLVER_VERSION), format_version
-    (the .div format the server reads, "2.0") and commit (the git commit of
-    the repository the server runs from). If git can't give the commit,
-    commit is null and commit_reason says why; otherwise commit_reason is
-    null.
+    (the .div format the server reads, "2.0"), commit (the git commit of
+    the repository the server runs from) and dirty (true when that
+    repository had changed, staged or untracked files when the server
+    started, so the code that runs is not exactly the commit; false when it
+    was clean). If git can't give the commit, commit is null and
+    commit_reason says why; if it can't say whether the repository is
+    clean, dirty is null and dirty_reason says why. Otherwise the two
+    reasons are null.
     """
-    commit, reason = _commit()
+    commit, commit_reason = _commit()
+    dirty, dirty_reason = _dirty()
     return {"solver_version": SOLVER_VERSION, "format_version": FORMAT_VERSION,
-            "commit": commit, "commit_reason": reason}
+            "commit": commit, "dirty": dirty,
+            "commit_reason": commit_reason, "dirty_reason": dirty_reason}
 
 
 def solve_div(div_json: str, name: str = SUMMARY_NAME) -> dict[str, Any]:
@@ -236,7 +262,8 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument("--port", type=int, default=HTTP_PORT,
                         help="with --http: port to listen on (default %(default)s)")
     args = parser.parse_args(argv)
-    _commit()       # read now: the commit of the code that has just been loaded
+    _commit()       # read now: the commit of the code that has just been loaded,
+    _dirty()        # and whether the folder had changes on top of it
     create_server(args.host, args.port).run(
         transport="streamable-http" if args.http else "stdio")
     return 0

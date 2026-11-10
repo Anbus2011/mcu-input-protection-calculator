@@ -37,6 +37,8 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SERVER_PY = os.path.join(ROOT, "skill", "server.py")
 ZENER = os.path.join(ROOT, "examples", "zener_gnd_bzb984_c3v3.div")
 SCHOTTKY = os.path.join(ROOT, "examples", "schottky_rail_bat54cv.div")
+EXAMPLES_DIR = os.path.join(ROOT, "examples")
+SKILL_EXAMPLES_DIR = os.path.join(ROOT, "skill", "examples")
 EXAMPLES = pytest.mark.parametrize("path", [ZENER, SCHOTTKY],
                                    ids=["zener_gnd", "schottky_rail"])
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -84,12 +86,40 @@ def git_head():
     return run.stdout.strip() if run.returncode == 0 else None
 
 
+def git_dirty():
+    try:
+        run = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
+                             capture_output=True, text=True)
+    except OSError:
+        return None
+    return bool(run.stdout.strip()) if run.returncode == 0 else None
+
+
 @pytest.fixture
 def fresh_commit():
-    """The commit is read once and kept: forget it before and after."""
+    """The commit and "dirty" are read once and kept: forget them before
+    and after."""
     server._commit.cache_clear()
+    server._dirty.cache_clear()
     yield
     server._commit.cache_clear()
+    server._dirty.cache_clear()
+
+
+def fake_git(monkeypatch, head="abc123\n", status="", calls=None):
+    """Replace git. *head* answers `git rev-parse HEAD` and *status*
+    `git status --porcelain`: the output, an exception to raise, or
+    (exit code, error text)."""
+    def run(command, **kwargs):
+        if calls is not None:
+            calls.append((command, kwargs))
+        answer = {"rev-parse": head, "status": status}[command[1]]
+        if isinstance(answer, Exception):
+            raise answer
+        if isinstance(answer, tuple):
+            return subprocess.CompletedProcess(command, answer[0], "", answer[1])
+        return subprocess.CompletedProcess(command, 0, answer, "")
+    monkeypatch.setattr(server.subprocess, "run", run)
 
 
 def png_of(result):
@@ -239,12 +269,59 @@ class TestSolveDiv:
         assert server.solve_div(as_text(invalid_design()))["valid"] is False
 
 
+# ── The skill's copies of the example files (its self-test) ──────────────────
+
+class TestSkillExamples:
+    """skill/examples/ holds copies of the files in examples/. Before
+    designing, the skill solves both through solve_div and stops if the
+    results differ from the stored ones."""
+
+    NAMES = ["schottky_rail_bat54cv.div", "zener_gnd_bzb984_c3v3.div"]
+
+    @staticmethod
+    def content(folder, name):
+        """A file's bytes, line ends as "\\n" (git may check out either)."""
+        with open(os.path.join(folder, name), "rb") as f:
+            return f.read().replace(b"\r\n", b"\n")
+
+    def test_the_copies_are_the_files_in_examples(self):
+        originals = sorted(n for n in os.listdir(EXAMPLES_DIR) if n.endswith(".div"))
+        assert originals == self.NAMES
+        assert sorted(os.listdir(SKILL_EXAMPLES_DIR)) == originals, \
+            "skill/examples/ must hold exactly the .div files of examples/"
+        for name in originals:
+            assert self.content(SKILL_EXAMPLES_DIR, name) == self.content(EXAMPLES_DIR, name), \
+                f"skill/examples/{name} differs from examples/{name}: copy it again"
+
+    @pytest.mark.parametrize("name", NAMES)
+    def test_self_test_passes_on_the_copies(self, name):
+        """What the skill does: solve the copy through solve_div and compare
+        with the results stored in it."""
+        text = text_of(os.path.join(SKILL_EXAMPLES_DIR, name))
+        stored = json.loads(text)["results"]
+        answer = server.solve_div(text, name)
+        assert answer["valid"] is True
+        assert json.loads(answer["div"])["results"] == stored
+        assert answer["div"] == text                # nothing at all changes
+        assert stored["solver_version"] == answer["solver_version"] == SOLVER_VERSION
+
+    def test_self_test_notices_a_changed_result(self):
+        """A stored result that the solver no longer gives does not pass."""
+        data = json.loads(text_of(os.path.join(SKILL_EXAMPLES_DIR, self.NAMES[1])))
+        stored = copy.deepcopy(data["results"])
+        data["resistors"]["r2"]["value"] = 18.2
+        answer = server.solve_div(as_text(data))
+        assert answer["valid"] is True
+        assert json.loads(answer["div"])["results"] != stored
+
+
 # ── solver_info ──────────────────────────────────────────────────────────────
 
 class TestSolverInfo:
     def test_versions_and_commit(self, fresh_commit):
         info = server.solver_info()
-        assert set(info) == {"solver_version", "format_version", "commit", "commit_reason"}
+        assert list(info) == ["solver_version", "format_version", "commit", "dirty",
+                              "commit_reason", "dirty_reason"]
         assert info["solver_version"] == SOLVER_VERSION == "2.0.0"
         assert info["format_version"] == "2.0"
         assert info["commit"] == git_head()
@@ -254,51 +331,83 @@ class TestSolverInfo:
             assert re.fullmatch(r"[0-9a-f]{40}", info["commit"])
             assert info["commit_reason"] is None
 
-    def test_git_is_run_in_the_repository_folder_without_the_servers_stdin(
+    def test_dirty_is_what_git_status_says_of_this_folder(self, fresh_commit):
+        info = server.solver_info()
+        assert info["dirty"] == git_dirty()
+        if info["dirty"] is None:
+            assert info["dirty_reason"]
+        else:
+            assert type(info["dirty"]) is bool and info["dirty_reason"] is None
+
+    @pytest.mark.parametrize("status, dirty", [
+        ("", False),
+        ("\n", False),
+        (" M skill/server.py\n", True),         # changed
+        ("M  README.md\n", True),               # staged
+        ("?? notes.txt\n", True),               # untracked
+        (" M a.py\n?? b.py\n", True),
+    ], ids=["clean", "blank line", "changed", "staged", "untracked", "several"])
+    def test_dirty_when_git_status_lists_anything(self, status, dirty,
+                                                  fresh_commit, monkeypatch):
+        fake_git(monkeypatch, status=status)
+        info = server.solver_info()
+        assert info["dirty"] is dirty and info["dirty_reason"] is None
+        assert info["commit"] == "abc123" and info["commit_reason"] is None
+
+    def test_git_is_run_once_in_the_repository_folder_without_the_servers_stdin(
             self, fresh_commit, monkeypatch):
         calls = []
-
-        def run(command, **kwargs):
-            calls.append((command, kwargs))
-            return subprocess.CompletedProcess(command, 0, "abc123\n", "")
-        monkeypatch.setattr(server.subprocess, "run", run)
-        assert server.solver_info()["commit"] == "abc123"
+        fake_git(monkeypatch, status=" M x.py\n", calls=calls)
+        first = server.solver_info()
+        assert (first["commit"], first["dirty"]) == ("abc123", True)
         assert server.solve_div("{}")["commit"] == "abc123"
-        (command, kwargs), = calls                       # read once, then kept
-        assert command == ["git", "rev-parse", "HEAD"]
-        assert os.path.samefile(kwargs["cwd"], ROOT)
-        # over stdio the server's stdin is the protocol: git must not get it
-        assert kwargs["stdin"] == subprocess.DEVNULL
+        # read once, then kept: a later change does not alter the answer
+        fake_git(monkeypatch, head="def456\n", status="", calls=calls)
+        assert server.solver_info() == first
+        assert server.solve_div("{}")["commit"] == "abc123"
+        assert [command for command, _kwargs in calls] == [
+            ["git", "rev-parse", "HEAD"], ["git", "status", "--porcelain"]]
+        for _command, kwargs in calls:
+            assert os.path.samefile(kwargs["cwd"], ROOT)
+            # over stdio the server's stdin is the protocol: git must not get it
+            assert kwargs["stdin"] == subprocess.DEVNULL
 
-    def test_no_git_gives_null_with_a_reason(self, fresh_commit, monkeypatch):
-        def run(*args, **kwargs):
-            raise FileNotFoundError("git is not installed")
-        monkeypatch.setattr(server.subprocess, "run", run)
+    def test_no_git_gives_nulls_with_a_reason(self, fresh_commit, monkeypatch):
+        missing = FileNotFoundError("git is not installed")
+        fake_git(monkeypatch, head=missing, status=missing)
         info = server.solver_info()
-        assert info["commit"] is None
-        assert info["commit_reason"] == "git could not be run: git is not installed"
+        assert info["commit"] is None and info["dirty"] is None
+        assert info["commit_reason"] == info["dirty_reason"] == \
+            "git could not be run: git is not installed"
         assert info["solver_version"] == SOLVER_VERSION
         # the other tools still answer
         answer = server.solve_div(text_of(ZENER))
         assert answer["valid"] is True and answer["commit"] is None
         assert info_of(server.plot_div(text_of(ZENER)))["commit"] is None
 
-    def test_not_a_git_folder_gives_null_with_a_reason(self, fresh_commit, monkeypatch):
-        monkeypatch.setattr(
-            server.subprocess, "run",
-            lambda command, **kw: subprocess.CompletedProcess(
-                command, 128, "", "fatal: not a git repository\n"))
+    def test_not_a_git_folder_gives_nulls_with_a_reason(self, fresh_commit, monkeypatch):
+        not_git = (128, "fatal: not a git repository\n")
+        fake_git(monkeypatch, head=not_git, status=not_git)
         info = server.solver_info()
-        assert info["commit"] is None
+        assert info["commit"] is None and info["dirty"] is None
         assert info["commit_reason"] == \
             "git rev-parse HEAD failed: fatal: not a git repository"
+        assert info["dirty_reason"] == \
+            "git status --porcelain failed: fatal: not a git repository"
 
-    def test_git_that_hangs_gives_null_with_a_reason(self, fresh_commit, monkeypatch):
-        def run(command, **kwargs):
-            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
-        monkeypatch.setattr(server.subprocess, "run", run)
+    def test_git_that_hangs_gives_nulls_with_a_reason(self, fresh_commit, monkeypatch):
+        hang = subprocess.TimeoutExpired(["git"], server.GIT_TIMEOUT_S)
+        fake_git(monkeypatch, head=hang, status=hang)
         info = server.solver_info()
         assert info["commit"] is None and "timed out" in info["commit_reason"]
+        assert info["dirty"] is None and "timed out" in info["dirty_reason"]
+
+    def test_dirty_unknown_does_not_hide_the_commit(self, fresh_commit, monkeypatch):
+        fake_git(monkeypatch, status=(1, ""))
+        info = server.solver_info()
+        assert info["commit"] == "abc123" and info["commit_reason"] is None
+        assert info["dirty"] is None
+        assert info["dirty_reason"] == "git status --porcelain failed: exit code 1"
 
 
 # ── plot_div ─────────────────────────────────────────────────────────────────
@@ -590,14 +699,15 @@ class TestCommandLine:
             server.FastMCP, "run",
             lambda self, transport="stdio", mount_path=None: runs.append(
                 (transport, self.settings.host, self.settings.port,
-                 server._commit.cache_info().currsize)))
+                 server._commit.cache_info().currsize
+                 + server._dirty.cache_info().currsize)))
         return runs
 
     def test_stdio_by_default(self, started):
         assert server.main([]) == 0
-        (transport, _host, _port, commit_read), = started
+        (transport, _host, _port, git_read), = started
         assert transport == "stdio"
-        assert commit_read == 1         # the commit is read before serving starts
+        assert git_read == 2    # the commit and "dirty" are read before serving starts
 
     def test_http_option(self, started):
         assert server.main(["--http"]) == 0

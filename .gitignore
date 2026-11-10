@@ -27,6 +27,7 @@ Desktop.ini
 # Design files (user data)
 *.div
 !examples/*.div
+!skill/examples/*.div
 
 # Datasheets (local reference copies, not redistributed)
 docs/*.pdf

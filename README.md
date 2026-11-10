@@ -2,7 +2,7 @@
 
 A Python desktop application for designing and analyzing a resistor divider with one clamp diode in front of a microcontroller GPIO/ADC input. The clamp can be a Zener or a Schottky, connected to GND or to the VDD rail. The app checks the pin voltage against the MCU's limits, the logic levels, the power in each part, the analog error and the input frequency the pin can handle. Works with any MCU family — STM32, ESP32, PIC, AVR, and more.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 
@@ -44,7 +44,7 @@ V_input ── R1 ──┬── R_series ──> MCU GPIO Pin
 
 ## Requirements
 
-- **Python 3.9** or newer
+- **Python 3.10** or newer
 
 ### Python Packages
 
@@ -55,6 +55,7 @@ V_input ── R1 ──┬── R_series ──> MCU GPIO Pin
 | `numpy` | Required by matplotlib |
 | `pillow` | Image processing support |
 | `pytest` | Running the test suite |
+| `mcp` | The MCP server (`skill/server.py`) and its tests: 1.26.0 or newer, below 2 |
 
 The test suite needs all of them, the tests that don't open a window included. Only the UI tests also need a desktop session.
 
@@ -90,7 +91,7 @@ pip install -r requirements.txt
 Or install manually:
 
 ```bash
-pip install customtkinter matplotlib numpy pillow pytest
+pip install customtkinter matplotlib numpy pillow pytest "mcp>=1.26.0,<2"
 ```
 
 ### 4. Run the application
@@ -364,7 +365,7 @@ The summary tells a blank diode table from one that is not modelled: "Forward ta
 
 | Tool | What it returns |
 |------|-----------------|
-| `solver_info` | The solver version, the `.div` format version and the git commit the server is running |
+| `solver_info` | The solver version, the `.div` format version, the git commit the server is running, and `dirty`: whether its folder had uncommitted changes when it started |
 | `solve_div` | Whether the file is valid, every problem as `key.path: message`, the file's text with `results` filled in, and the summary `divcheck.py` prints |
 | `plot_div` | A PNG of pin voltage against input voltage: typical, lowest and highest of the eight corners, with VIL, VIH and the pin limits. It is the same sweep as the app's plot |
 
@@ -374,13 +375,19 @@ The server needs the `mcp` package (in `requirements.txt`; Python 3.10 or newer,
 
 ### Running it
 
+The server runs over stdio: Claude Desktop starts it from the registration entry below and stops it again, so there is nothing to start by hand.
+
 ```bash
-python skill/server.py                                    # stdio: the form Claude starts
-python skill/server.py --http                             # streamable HTTP at http://127.0.0.1:8000/mcp
-python skill/server.py --http --host 0.0.0.0 --port 8080  # another address and port
+python skill/server.py            # stdio: what the registration entry runs
 ```
 
-Over stdio the server waits for a client on its standard input; stop it with Ctrl+C. The HTTP form has no login: use it on a network you trust.
+`--http` is an optional switch, kept only for a later move to a dedicated server. It serves streamable HTTP at `http://127.0.0.1:8000/mcp`; `--host` and `--port` change the address and the port. The HTTP form has no login.
+
+```bash
+python skill/server.py --http
+```
+
+`skill/examples/` holds copies of the two files in `examples/` for the skill's self-test: before designing, the skill solves both through `solve_div` and stops if the results differ from the stored ones. A test keeps the copies identical to `examples/`.
 
 ### Registering it in Claude Desktop
 
@@ -422,7 +429,8 @@ mcu-input-protection-calculator/
 │
 ├── skill/
 │   ├── server.py                 # MCP server: solves and plots a .div for a Claude chat
-│   └── plot_png.py               # Headless PNG of the plot, for the server
+│   ├── plot_png.py               # Headless PNG of the plot, for the server
+│   └── examples/                 # Copies of examples/, for the skill's self-test
 │
 ├── src/
 │   ├── core/
@@ -490,7 +498,7 @@ Everything else about a part (diode tables, capacitance, MCU limits, pin capacit
 python -m pytest tests/ -v
 ```
 
-All 821 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
+All 892 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
 
 ```bash
 python -m pytest tests/ -m "not ui"
