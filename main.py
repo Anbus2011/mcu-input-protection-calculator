@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 MCU Input Protection Calculator
-Voltage divider with Zener clamp protection analysis for any MCU GPIO/ADC input.
+Resistor divider with one clamp diode (Zener or Schottky, to GND or to the
+VDD rail): protection analysis for any MCU GPIO/ADC input.
 
 Entry point for the modular application.
 File extension: .div
