@@ -34,7 +34,7 @@ V_input ── R1 ──┬── R_series ──> MCU GPIO Pin
 - **Worst case from all corners** - R1 min/max × R2 min/max × diode minimum/maximum column; the lowest or highest is used as each check requires
 - **Checks with one verdict** - pin voltage against Safe Max, Absolute Max and Pin Min, logic levels, power in every part, analog range and error, required frequency
 - **Signal bandwidth in two numbers** - "may work up to" and "reliable up to"
-- **Interactive plot** - V_mcu vs V_input with typical and worst-case traces, dark/light theme toggle
+- **Interactive plot** - V_mcu vs V_input with the typical, lowest and highest traces, the band between them, and the VIH / VIL levels; dark/light theme toggle
 - **`.div` files, format 2.0** - JSON; holds every input, the part data with its source, and the solver's results
 - **Command-line checker** - `divcheck.py` validates and solves a `.div` file with the same solver, without the GUI packages
 - **No hidden defaults, no presets** - blank inputs stay blank; results that need them say "needs input"
@@ -135,6 +135,8 @@ Enter values for R1, R2, and the optional R_series. Each resistor has:
 - **Power rating** (mW) - used to calculate margin percentage
 - **Tolerance** (%) - used for worst-case analysis
 
+Each resistor is one row under the headers Value, Unit, Rating (mW) and Tol. (%), with a "?" at the right. The labels, the value fields and the "?" buttons line up with those of the panels below.
+
 R_series blank or 0 means there is no series resistor; its unit, rating and tolerance are then not needed, and the R_s row of the power table shows "no R_s". When R_series is above 0 all three are needed.
 
 #### Clamp Diode
@@ -220,6 +222,8 @@ The line above the tabs shows the worst status among all the checks: **FAIL**, e
 
 #### Tab 1: Component Analysis
 
+The tab scrolls, so that the plot under it keeps its height.
+
 - **Divider Network** - input impedance, divider ratio, ADC source impedance (R1∥R2 + R_s), total typical power dissipation (R1 + R2 + clamp diode)
 - **Component Power** - for R1, R2, the clamp diode and R_s at max input: typical current, typical power, worst-case power, rating, and margin % against both the typical and the worst-case power
 - **Power verdict (worst case)** - the worst status of the parts
@@ -254,10 +258,10 @@ The MCU pin voltage at each input level:
 | Logic Low | V_mcuH must be below VIL (VIL factor x VDD) |
 | Logic High | V_mcuL must be above VIH (VIH factor x VDD) |
 | ADC Scale | V_mcuH must not exceed VDD |
-| Max Input | V_mcuH must not exceed Absolute Max |
+| Max Input | V_mcuH against Safe Max and Absolute Max. Both limits are shown ("≤ 3.60 V safe / ≤ 4.00 V abs") and the status is the worse of the two, so the row agrees with the overall verdict |
 | Touch | Information only |
 
-Each row shows **V_mcuL** and **V_mcuH**, the lowest and highest pin voltage over all eight corners. Rows whose input is not given show "--".
+Each row shows **V_mcuL** and **V_mcuH**, the lowest and highest pin voltage over all eight corners. The value a row is judged on is in bold: V_mcuL for Logic High and Min Input, V_mcuH for Logic Low, ADC Scale and Max Input. Rows with no check (0V, Touch, a Min Input that is not negative) have nothing in bold. Rows whose input is not given show "--".
 
 The pin voltage is solved by bisection to 1 nV on the node equation (current through R1 = current through R2 + diode current). If the bisection can't bracket a solution, the report line says "did not settle" and names the input levels affected.
 
@@ -288,11 +292,16 @@ The bottom of the right panel shows **V_mcu vs V_input**, from 0 V (or a negativ
 
 - **Cyan line** - typical V_mcu (nominal resistors, typical diode column)
 - **Orange line** - V_mcuH, the highest of all corners
-- **Green dashed** - VDD threshold
-- **Gold dashed** - Safe Max threshold
+- **Violet line** - V_mcuL, the lowest of all corners
+- **Shaded band** - between V_mcuL and V_mcuH: where the pin voltage can lie
 - **Red dashed** - Absolute Max threshold
+- **Gold dashed** - Safe Max threshold
+- **Green dashed** - VDD threshold
+- **Thin pink lines** - VIH (dash-dot) and VIL (dotted), each named at its right end. Where the V_mcuL curve is under the VIH line, the input does not read high
 
-Each curve and line is drawn only when its inputs are present. When neither curve can be calculated, the plot is cleared and says which inputs are needed. The curves come from the same solver function as the tables.
+The legend is to the right of the plot area, so it never covers a curve, and lists the lines in this order. The plot is about 360 px high in a 1400×900 window.
+
+Each curve and line is drawn only when its inputs are present; V_mcuL, V_mcuH and the band need the tolerances and both outer diode columns. When no curve can be calculated, the plot is cleared and says which inputs are needed. The curves come from the same solver function as the tables.
 
 Use the **Theme** dropdown to switch between Dark and Light plot styles.
 
@@ -415,7 +424,7 @@ Everything else about a part (diode tables, capacitance, MCU limits, pin capacit
 python -m pytest tests/ -v
 ```
 
-All 789 tests must pass. `tests/test_ui.py` drives the real window (withdrawn), so it needs a desktop session and takes about three minutes. Its tests carry the marker `ui`; to run the rest in a few seconds:
+All 814 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
 
 ```bash
 python -m pytest tests/ -m "not ui"

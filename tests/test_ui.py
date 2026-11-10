@@ -925,14 +925,17 @@ def test_input_levels_table(w):
     rows = w.operating_tab.rows
     assert list(rows) == ["min_input", "zero", "logic_low", "logic_high",
                           "analog_fullscale", "max_input", "touch"]
+    # Rewritten: the Max Input row shows both of its limits (was "≤ 4.0V abs"),
+    # and every requirement has a space before its unit, as the row's
+    # voltages have (was "> VIH 2.31V").
     assert [text(c) for c in rows["logic_high"].values()] == [
-        "3.80 V", "1.831 V", "2.110 V", "> VIH 2.31V", "✗ FAIL"]
+        "3.80 V", "1.831 V", "2.110 V", "> VIH 2.31 V", "✗ FAIL"]
     assert [text(c) for c in rows["logic_low"].values()] == [
-        "1.00 V", "0.637 V", "0.647 V", "< VIL 0.99V", "✓ PASS"]
+        "1.00 V", "0.637 V", "0.647 V", "< VIL 0.99 V", "✓ PASS"]
     assert [text(c) for c in rows["analog_fullscale"].values()] == [
-        "5.10 V", "2.019 V", "2.352 V", "≤ VDD 3.30V", "✓ PASS"]
+        "5.10 V", "2.019 V", "2.352 V", "≤ VDD 3.30 V", "✓ PASS"]
     assert [text(c) for c in rows["max_input"].values()] == [
-        "30.00 V", "2.840 V", "3.239 V", "≤ 4.0V abs", "✓ PASS"]
+        "30.00 V", "2.840 V", "3.239 V", "≤ 3.60 V safe / ≤ 4.00 V abs", "✓ PASS"]
     assert [text(c) for c in rows["zero"].values()] == [
         "0.00 V", "0.000 V", "0.000 V", NOT_GIVEN, "Zero ref"]
     for level in ("min_input", "touch"):
@@ -951,7 +954,8 @@ def test_min_input_row(w):
     type_into(w, "system.v_input_min", "-5")
     assert [text(c) for c in s.min_row.values()] == ["-0.293 V", "-0.30 V", "+7 mV", "✓ PASS"]
     row = w.operating_tab.rows["min_input"]
-    assert text(row["thresh"]) == "≥ -0.30V pin min" and text(row["status"]) == "✓ PASS"
+    # Rewritten: a space before the unit (was "≥ -0.30V pin min")
+    assert text(row["thresh"]) == "≥ -0.30 V pin min" and text(row["status"]) == "✓ PASS"
     type_into(w, "mcu.v_pin_min", "-0.2")
     assert text(s.min_row["status"]) == "✗ FAIL" and text(s.min_row["margin"]) == "-93 mV"
     type_into(w, "mcu.v_pin_min", "")
@@ -1062,14 +1066,20 @@ def test_clamp_diode_rows(w):
     assert row(pair) == row(d.help["diode.anode"]) == 2
     assert "diode.cathode" not in d.help
     assert [t for t in all_label_texts(pair)] == ["Anode", "Cathode"]
-    # Capacitance (pF) and Ptot (mW) on one row, each with its own "?"
-    pair = grid_of(widget(w, "diode.capacitance_pf"))
-    assert pair is grid_of(widget(w, "diode.ptot_mw")) and row(pair) == 3
-    assert d.help["diode.capacitance_pf"].master is pair and d.help["diode.ptot_mw"].master is pair
+    # Rewritten: Capacitance (pF) and Ptot (mW) have a row each on the grid,
+    # with the "?" in the "?" column (was: one row, each "?" beside its unit).
+    for i, (key, unit) in enumerate((("diode.capacitance_pf", "pF"), ("diode.ptot_mw", "mW")),
+                                    start=3):
+        entry, help_ = widget(w, key), d.help[key]
+        assert entry.master is grid and help_.master is grid
+        assert row(entry) == row(help_) == i
+        assert int(entry.grid_info()["column"]) == 1
+        assert int(help_.grid_info()["column"]) == input_panels.HELP_COL
+        units = [c for c in grid.grid_slaves(row=i, column=2)]
+        assert [text(u) for u in units] == [unit]
     assert d.help["diode.capacitance_pf"] is not d.help["diode.ptot_mw"]
-    assert [t for t in all_label_texts(pair)] == ["pF", "?", "Ptot:", "mW", "?"]
-    labels = [t for t in all_label_texts(grid) if t.endswith(":") and t != "Ptot:"]
-    assert labels == ["Part:", "Type:", "Connection:", "Capacitance:"]
+    labels = [t for t in all_label_texts(grid) if t.endswith(":")]
+    assert labels == ["Part:", "Type:", "Connection:", "Capacitance:", "Ptot:"]
 
 
 def test_diode_tables_are_real_grids(w):
@@ -1342,3 +1352,237 @@ def test_theme_label_comes_before_the_drop_down(w):
     # packed from the right: the drop-down first, so the label is to its left
     order = label.master.pack_slaves()
     assert order.index(menu) < order.index(label)
+
+
+# ── Input Levels: both limits at Max Input, the judged value in bold ──────────
+
+def test_max_input_row_shows_both_limits_and_the_worse_status(w):
+    """Safe Max and Absolute Max, with the worse of the two statuses, so the
+    row agrees with the overall verdict."""
+    load_design(w, schottky_rail())
+    row, safety = w.operating_tab.rows["max_input"], w.safety_tab
+    assert [text(c) for c in row.values()] == [
+        "30.00 V", "3.442 V", "3.651 V", "≤ 3.60 V safe / ≤ 4.00 V abs", "✗ FAIL"]
+    assert text(safety.rec_row["status"]) == "✗ FAIL"
+    assert text(safety.abs_row["status"]) == "✓ PASS"
+    assert "Safe Max" in text(w.verdict) and "Abs. Max" not in text(w.verdict)
+    # TIGHT against Safe Max, PASS against Absolute Max
+    type_into(w, "mcu.v_recommended_max", "3.67")
+    assert text(row["thresh"]) == "≤ 3.67 V safe / ≤ 4.00 V abs"
+    assert text(row["status"]) == "⚠ TIGHT"
+    # PASS against both
+    type_into(w, "mcu.v_recommended_max", "3.8")
+    assert text(row["status"]) == "✓ PASS"
+    # the status follows Absolute Max as well
+    type_into(w, "mcu.v_absolute_max", "3.7")
+    assert text(row["thresh"]) == "≤ 3.80 V safe / ≤ 3.70 V abs"
+    assert text(row["status"]) == text(safety.abs_row["status"]) == "⚠ TIGHT"
+    type_into(w, "mcu.v_absolute_max", "3.6")
+    assert text(row["status"]) == text(safety.abs_row["status"]) == "✗ FAIL"
+    # a blank limit is named; with both blank the cell says "needs input"
+    type_into(w, "mcu.v_absolute_max", "")
+    assert text(row["thresh"]) == "≤ 3.80 V safe / Abs. Max: needs input"
+    assert text(row["status"]) == NEEDS_INPUT
+    type_into(w, "mcu.v_recommended_max", "")
+    assert text(row["thresh"]) == NEEDS_INPUT and text(row["status"]) == NEEDS_INPUT
+
+
+def test_value_each_row_is_judged_on_is_bold(w):
+    rows = w.operating_tab.rows
+
+    def bold(level):
+        return {key for key in ("v_in", "v_mcu_l", "v_mcu_h", "thresh")
+                if "bold" in rows[level][key].cget("font")}
+
+    load_reference(w)
+    assert bold("logic_high") == {"v_mcu_l"}        # must stay above VIH
+    assert bold("logic_low") == {"v_mcu_h"}         # must stay below VIL
+    assert bold("analog_fullscale") == {"v_mcu_h"}
+    assert bold("max_input") == {"v_mcu_h"}
+    # rows with no check: nothing in bold
+    for level in ("zero", "touch", "min_input"):
+        assert bold(level) == set(), level
+    type_into(w, "system.v_touch", "60")
+    assert text(rows["touch"]["v_mcu_h"]) == "3.538 V" and bold("touch") == set()
+    type_into(w, "system.v_analog_fullscale", "")
+    assert bold("analog_fullscale") == set()
+    # Min Input is judged (on V_mcuL) only when it is negative
+    load_design(w, schottky_gnd())
+    type_into(w, "system.v_input_min", "-5")
+    assert text(rows["min_input"]["v_mcu_l"]) == "-0.293 V" and bold("min_input") == {"v_mcu_l"}
+    type_into(w, "system.v_input_min", "2")
+    assert text(rows["min_input"]["status"]) == "info" and bold("min_input") == set()
+    assert any("Bold: the value the row is judged on." in t for t in all_label_texts(w))
+
+
+# ── Plot: lowest curve, band, VIH and VIL, legend outside ─────────────────────
+
+def test_plot_has_the_lowest_curve_and_the_band(w):
+    load_reference(w)
+    plot, p = w.plot, w.app_state.plot_data
+    low, high = plot.lines["v_mcu_low"], plot.lines["v_mcu_worst"]
+    assert low.get_label() == "V_mcuL (worst case)"
+    assert list(low.get_xdata()) == p["v_in"] and list(low.get_ydata()) == p["v_mcu_low"]
+    assert list(high.get_ydata()) == p["v_mcu_worst"]
+    assert low in plot.ax.lines and plot.ax.lines[0] is plot.lines["v_mcu_typ"]
+    # the band between the lowest and the highest is shaded
+    assert plot.band is not None and plot.band in plot.ax.collections
+    ys = [float(y) for y in plot.band.get_paths()[0].vertices[:, 1]]
+    assert min(ys) == min(p["v_mcu_low"]) and max(ys) == max(p["v_mcu_worst"])
+    assert 0 < plot.band.get_alpha() < 0.3
+    # the curve and the Input Levels table agree at Max Input
+    row = w.operating_tab.rows["max_input"]
+    assert f"{low.get_ydata()[-1]:.3f} V" == text(row["v_mcu_l"]) == "2.840 V"
+    assert f"{high.get_ydata()[-1]:.3f} V" == text(row["v_mcu_h"]) == "3.239 V"
+    # no tolerance: no corners, so no lowest curve and no band
+    type_into(w, "r1.tol", "")
+    assert set(plot.lines) & {"v_mcu_typ", "v_mcu_low", "v_mcu_worst"} == {"v_mcu_typ"}
+    assert plot.band is None and not plot.ax.collections
+
+
+def test_plot_has_vih_and_vil_lines_with_labels(w):
+    load_reference(w)
+    plot, volts = w.plot, w.app_state.results["voltages"]
+    for key, name in (("vih", "VIH"), ("vil", "VIL")):
+        line = plot.lines[key]
+        assert [float(y) for y in line.get_ydata()] == [volts[key], volts[key]]    # horizontal
+        assert line.get_linewidth() <= 1 < plot.lines["v_mcu_typ"].get_linewidth()  # thin
+        assert line.get_linewidth() < plot.lines["vdd"].get_linewidth()
+        label = plot.level_labels[key]              # named on the line itself
+        assert label.get_text() == name and label.xy == (1.0, volts[key])
+    legend = [t.get_text() for t in plot.ax.get_legend().get_texts()]
+    assert "VIH (2.31V)" in legend and "VIL (0.99V)" in legend
+    # the logic-high failure shows: at the Logic High input the lowest curve is under VIH
+    lowest = w.app_state.circuit.pin_voltage(3.8, "low")
+    assert lowest < volts["vih"] and text(w.operating_tab.rows["logic_high"]["status"]) == "✗ FAIL"
+    # a blank factor removes its line only
+    type_into(w, "mcu.vih_factor", "")
+    assert "vih" not in plot.lines and "vih" not in plot.level_labels
+    assert "vil" in plot.lines and plot.has_curves
+
+
+@pytest.mark.parametrize("theme", ["Dark", "Light"])
+@pytest.mark.parametrize("design", [zener_reference, schottky_rail, schottky_gnd])
+def test_legend_is_outside_the_plot_area(w, design, theme):
+    load_design(w, design(system__v_input_min=-5.0) if design is schottky_gnd else design())
+    plot = w.plot
+    plot.theme_var.set(theme)
+    plot._on_theme_change(theme)
+    try:
+        plot.canvas.draw()
+        renderer = plot.canvas.get_renderer()
+        axes = plot.ax.get_window_extent(renderer)
+        legend = plot.ax.get_legend().get_window_extent(renderer)
+        figure = plot.fig.bbox
+        assert legend.x0 >= axes.x1                 # to the right of the plot area
+        assert legend.x1 <= figure.x1 and figure.y0 <= legend.y0 and legend.y1 <= figure.y1
+        assert axes.width > 0.6 * figure.width      # and the plot area keeps most of the width
+        # every line is in the legend, in the order they appear from top to bottom
+        assert [t.get_text() for t in plot.ax.get_legend().get_texts()] == [
+            "V_mcuH (worst case)", "V_mcu (typical)", "V_mcuL (worst case)",
+            "Abs. Max (4V)", "Safe Max (3.6V)", "VDD (3.3V)", "VIH (2.31V)", "VIL (0.99V)"]
+    finally:
+        plot.theme_var.set("Dark")
+        plot._on_theme_change("Dark")
+
+
+# ── Layout in the shown window (1400x900) ─────────────────────────────────────
+
+TAB_NAMES = ("Component Analysis", "MCU Input", "Input Levels", "Signal Bandwidth")
+
+
+@pytest.fixture
+def shown(w):
+    """The window on the screen at 1400x900: these tests need real sizes,
+    which a withdrawn window does not have."""
+    w.geometry("1400x900+40+40")
+    w.deiconify()
+    pump(w, 300)
+    if (w.winfo_width(), w.winfo_height()) != (1400, 900):
+        w.withdraw()
+        pytest.skip("needs a screen that a 1400x900 window fits on")
+    yield w
+    w.tabs.set("Component Analysis")
+    pump(w, 200)
+    w.withdraw()
+    w.update()
+
+
+def select_tab(w, name):
+    w.tabs.set(name)
+    pump(w, 200)        # CTkTabview.set() finishes 100 ms later
+
+
+def left_x(wd):
+    return wd.winfo_rootx()
+
+
+def test_plot_keeps_its_height_on_every_tab(shown):
+    """About 350 px for the plot at 1400x900, on the Component Analysis tab
+    too: that tab's content scrolls."""
+    w = shown
+    load_design(w, schottky_rail())
+    canvas = w.plot.canvas.get_tk_widget()
+    for name in TAB_NAMES:
+        select_tab(w, name)
+        assert canvas.winfo_height() >= 350, name
+    select_tab(w, "Component Analysis")
+    scroll = w.components_scroll
+    assert isinstance(scroll, ctk.CTkScrollableFrame)
+    assert w.components_tab.r_total.winfo_ismapped()
+    # more content than fits: all of it is reached by scrolling
+    first, last = scroll._parent_canvas.yview()
+    assert first == 0 and last < 1
+    scroll._parent_canvas.yview_moveto(1)
+    w.update()
+    assert scroll._parent_canvas.yview()[1] == 1
+    assert w.components_tab.vclamp_worst.winfo_ismapped()
+    scroll._parent_canvas.yview_moveto(0)
+
+
+def test_resistor_panel_is_on_the_shared_grid(shown):
+    """The label column, the value column and the "?" column of the other
+    panels; value, unit, rating and tolerance on one row."""
+    w = shown
+    load_design(w, schottky_rail())
+    panel, grid = w.resistor_panel, w.resistor_panel.grid_frame
+    assert grid.grid_columnconfigure(0)["minsize"] == input_panels.LABEL_W
+    assert grid.grid_columnconfigure(1)["minsize"] == input_panels.FIELD_W
+    assert grid.grid_columnconfigure(panel.HELP_COL)["minsize"] == input_panels.HELP_W
+    field, help_ = widget(w, "mcu.vdd"), w.mcu_panel.help["mcu.vdd"]
+    part_label = [c for c in grid_of(field).grid_slaves(column=0) if text(c) == "VDD/VDDA:"][0]
+    assert [text(h) for h in panel.headers] == ["Value", "Unit", "Rating (mW)", "Tol. (%)"]
+    for i, (prefix, name) in enumerate((("r1", "R1:"), ("r2", "R2:"), ("rs", "R_s:")), start=1):
+        fields = [widget(w, f"{prefix}.{n}") for n in ("value", "unit", "rating", "tol")]
+        # one row, in the grid, left to right
+        assert all(f.master is grid and int(f.grid_info()["row"]) == i for f in fields)
+        assert [int(f.grid_info()["column"]) for f in fields] == [1, 2, 3, 4]
+        xs = [left_x(f) for f in fields]
+        assert xs == sorted(xs)
+        # the label, the value field and the "?" line up with the panels below
+        label = grid.grid_slaves(row=i, column=0)[0]
+        assert text(label) == name and left_x(label) == left_x(part_label)
+        assert left_x(fields[0]) == left_x(field)
+        assert fields[0].winfo_width() == field.winfo_width() == input_panels.FIELD_W
+        button = panel.help[f"{prefix}.value"]
+        assert int(button.grid_info()["row"]) == i
+        assert int(button.grid_info()["column"]) == panel.HELP_COL
+        assert left_x(button) == left_x(help_)
+        # nothing runs into the "?" column
+        assert left_x(fields[-1]) + fields[-1].winfo_width() < left_x(button)
+        for header, f in zip(panel.headers, fields):
+            assert left_x(header) == left_x(f)
+    assert "no series resistor" in panel.help["rs.value"].tooltip.text
+    assert "power rating" in panel.help["r1.value"].tooltip.text
+
+
+def test_capacitance_and_ptot_help_is_in_the_help_column(shown):
+    w = shown
+    d = w.diode_panel
+    field, help_ = widget(w, "mcu.vdd"), w.mcu_panel.help["mcu.vdd"]
+    for key in ("diode.capacitance_pf", "diode.ptot_mw"):
+        assert left_x(d.help[key]) == left_x(d.help["diode.type"]) == left_x(help_)
+        assert left_x(widget(w, key)) == left_x(field)
+        assert widget(w, key).winfo_width() == field.winfo_width()
+    assert "Signal Bandwidth time constant" in d.help["diode.capacitance_pf"].tooltip.text
+    assert "Power rating of the diode" in d.help["diode.ptot_mw"].tooltip.text

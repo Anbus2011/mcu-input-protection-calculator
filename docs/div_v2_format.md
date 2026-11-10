@@ -235,6 +235,8 @@ The Schottky column shows why all eight corners are solved: below VDD the rail d
 
 It validates the file, solves it and prints a summary. With `out.div` it writes the file back with `results` filled in (`out.div` may be the same file as `in.div`). With `--json` it writes `results` alone.
 
+The summary tells the two kinds of table with no rows apart: a `null` table prints "Forward table not filled in: needs input" (or "Reverse ..."), an empty `[]` table "No forward data: forward conduction is not modelled".
+
 Exit code 0: the file was valid and solved, whatever the statuses. 1: the file was invalid; every problem is listed as `key.path: message`. 2: a file could not be read or written.
 
 The app writes a file back with every input exactly as it was read (`10` stays `10`, `10.0` stays `10.0`, `null` and `[]` stay), unless that input was edited in the app; only `results` is rewritten. An edited number is written as it was typed.

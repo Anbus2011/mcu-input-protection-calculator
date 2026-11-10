@@ -25,6 +25,9 @@ from src.ui.output_panels import (
 from src.models.clamp_solver import FAIL, TIGHT
 from src.ui.plot_canvas import PlotCanvas
 
+# Height of the scrolling area of the Component Analysis and MCU Input tabs
+TAB_SCROLL_HEIGHT = 300
+
 
 class MainWindow(ctk.CTk):
     def __init__(self):
@@ -276,9 +279,14 @@ class MainWindow(ctk.CTk):
         tab_op = self.tabs.add("Input Levels")
         tab_bw = self.tabs.add("Signal Bandwidth")
 
-        self.components_tab = ComponentsTab(tab_comp)
+        # The two long tabs scroll, so that the plot under them keeps its
+        # height (about 360 px in a 1400x900 window).
+        self.components_scroll = ctk.CTkScrollableFrame(
+            tab_comp, fg_color="transparent", height=TAB_SCROLL_HEIGHT)
+        self.components_scroll.pack(fill="both", expand=True)
+        self.components_tab = ComponentsTab(self.components_scroll)
         safety_scroll = ctk.CTkScrollableFrame(tab_safety, fg_color="transparent",
-                                               height=300)
+                                               height=TAB_SCROLL_HEIGHT)
         safety_scroll.pack(fill="both", expand=True)
         self.safety_tab = SafetyTab(safety_scroll)
         self.operating_tab = OperatingTab(tab_op)

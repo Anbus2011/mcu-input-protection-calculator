@@ -71,7 +71,40 @@ class TestSummary:
         assert divcheck.main([write(tmp_path, blank_design())]) == 0
         out = capsys.readouterr().out
         assert "VERDICT: needs input" in out
-        assert "No forward data" in out and "No reverse data" in out
+        # Rewritten: both tables are null (not filled in), which is not the
+        # same as [] (not modelled). Was: "No forward data" / "No reverse data".
+        assert "  Forward table not filled in: needs input\n" in out
+        assert "  Reverse table not filled in: needs input\n" in out
+        assert "No forward data" not in out and "No reverse data" not in out
+
+    @pytest.mark.parametrize("table", ["forward", "reverse"])
+    def test_null_table_is_not_filled_in(self, tmp_path, capsys, table):
+        """null: the table is still needed. It is not called "not modelled"."""
+        other = "reverse" if table == "forward" else "forward"
+        data = schottky_rail(**{f"clamp_diode__{table}": None})
+        assert divcheck.main([write(tmp_path, data)]) == 0
+        out = capsys.readouterr().out
+        assert f"  {table.capitalize()} table not filled in: needs input\n" in out
+        assert f"No {table} data" not in out and "is not modelled" not in out
+        assert f"{other.capitalize()} table not filled in" not in out
+        assert f"Needs input:\n  clamp_diode.{table}\n" in out
+        assert out.isascii()
+
+    @pytest.mark.parametrize("table", ["forward", "reverse"])
+    def test_empty_table_is_not_modelled(self, tmp_path, capsys, table):
+        """[]: the direction is not modelled, and nothing is asked for."""
+        data = schottky_rail(**{f"clamp_diode__{table}": []})
+        assert divcheck.main([write(tmp_path, data)]) == 0
+        out = capsys.readouterr().out
+        assert f"  No {table} data: {table} conduction is not modelled\n" in out
+        assert "not filled in" not in out and "Needs input" not in out
+
+    def test_one_table_null_and_the_other_empty(self, tmp_path, capsys):
+        data = zener_reference(clamp_diode__reverse=None)       # forward is []
+        assert divcheck.main([write(tmp_path, data)]) == 0
+        out = capsys.readouterr().out
+        assert ("  No forward data: forward conduction is not modelled\n"
+                "  Reverse table not filled in: needs input\n") in out
 
     def test_checked_parts_are_not_listed(self, tmp_path, capsys):
         data = zener_reference(clamp_diode__checked=True)

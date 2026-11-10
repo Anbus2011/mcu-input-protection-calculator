@@ -337,16 +337,27 @@ class SafetyTab:
 # ── Input Levels Tab ──────────────────────────────────────────────────────────
 
 class OperatingTab:
-    """Pin voltage at each input level, with the check that level feeds."""
+    """Pin voltage at each input level, with the checks that level feeds.
 
-    # level id, row label, check id
-    ROWS = (("min_input", "Min Input", "pin_min"), ("zero", "0V", None),
-            ("logic_low", "Logic Low", "logic_low"), ("logic_high", "Logic High", "logic_high"),
-            ("analog_fullscale", "ADC Scale", "analog_range"),
-            ("max_input", "Max Input", "pin_max_abs"), ("touch", "Touch", None))
-    REQUIREMENTS = {"pin_min": "≥ {:.2f}V pin min", "logic_low": "< VIL {:.2f}V",
-                    "logic_high": "> VIH {:.2f}V", "analog_range": "≤ VDD {:.2f}V",
-                    "pin_max_abs": "≤ {:.1f}V abs"}
+    The value a row is judged on is in bold: V_mcuL where the pin must stay
+    above a limit, V_mcuH where it must stay below one. A row with no check
+    (0 V, Touch, a Min Input that is not negative) has nothing in bold."""
+
+    # level id, row label, check ids, the cell the row is judged on
+    ROWS = (("min_input", "Min Input", ("pin_min",), "v_mcu_l"),
+            ("zero", "0V", (), None),
+            ("logic_low", "Logic Low", ("logic_low",), "v_mcu_h"),
+            ("logic_high", "Logic High", ("logic_high",), "v_mcu_l"),
+            ("analog_fullscale", "ADC Scale", ("analog_range",), "v_mcu_h"),
+            ("max_input", "Max Input", ("pin_max_safe", "pin_max_abs"), "v_mcu_h"),
+            ("touch", "Touch", (), None))
+    REQUIREMENTS = {"pin_min": "≥ {:.2f} V pin min", "logic_low": "< VIL {:.2f} V",
+                    "logic_high": "> VIH {:.2f} V", "analog_range": "≤ VDD {:.2f} V",
+                    "pin_max_safe": "≤ {:.2f} V safe", "pin_max_abs": "≤ {:.2f} V abs"}
+    PLAIN, BOLD = ("", 13), ("", 13, "bold")
+    CAPTION = ("V_mcuL / V_mcuH: the lowest / highest pin voltage over all corners "
+               "(R1, R2 tolerance; clamp diode minimum and maximum columns). "
+               "Bold: the value the row is judged on.")
 
     def __init__(self, parent: ctk.CTkFrame):
         self._build(parent)
@@ -356,7 +367,7 @@ class OperatingTab:
         self.table.pack(fill="x", padx=10, pady=10)
 
         headers = ["Level", "V_input", "V_mcuL", "V_mcuH", "Requirement", "Status"]
-        widths = [90, 85, 85, 85, 130, 90]
+        widths = [90, 85, 85, 85, 210, 100]
 
         for i, (text, w) in enumerate(zip(headers, widths)):
             ctk.CTkLabel(self.table, text=text, width=w, font=("", 12, "bold"),
@@ -364,47 +375,58 @@ class OperatingTab:
                 row=0, column=i, padx=1, pady=1, sticky="ew")
 
         self.rows = {}
-        for i, (level, label, _check) in enumerate(self.ROWS):
+        for i, (level, label, _checks, _judged) in enumerate(self.ROWS):
             rn = i + 1
             bg = ("gray90", "gray20") if i % 2 == 0 else ("gray95", "gray17")
             ctk.CTkLabel(self.table, text=label, width=widths[0], anchor="w",
-                         font=("", 13), fg_color=bg).grid(row=rn, column=0, padx=1, pady=1, sticky="ew")
+                         font=self.PLAIN, fg_color=bg).grid(row=rn, column=0, padx=1, pady=1,
+                                                            sticky="ew")
             cells = {}
             for j, (key, w) in enumerate(zip(["v_in", "v_mcu_l", "v_mcu_h", "thresh", "status"],
                                              widths[1:]), start=1):
-                bold = key in ("v_mcu_h", "status")
                 c = ctk.CTkLabel(self.table, text=NEEDS_INPUT, width=w, anchor="w",
-                                 font=("", 13, "bold") if bold else ("", 13), fg_color=bg,
-                                 text_color=MUTED)
+                                 font=self.BOLD if key == "status" else self.PLAIN,
+                                 fg_color=bg, text_color=MUTED)
                 c.grid(row=rn, column=j, padx=1, pady=1, sticky="ew")
                 cells[key] = c
             self.rows[level] = cells
-        ctk.CTkLabel(parent, text="V_mcuL / V_mcuH: the lowest / highest pin voltage over all "
-                                  "corners (R1, R2 tolerance; clamp diode minimum and "
-                                  "maximum columns).",
-                     text_color=MUTED, font=("", 11), wraplength=600, justify="left").pack(
-            anchor="w", padx=10)
+        ctk.CTkLabel(parent, text=self.CAPTION, text_color=MUTED, font=("", 11),
+                     wraplength=680, justify="left").pack(anchor="w", padx=10)
+
+    def _requirement(self, checks) -> tuple:
+        """(text, colour) of the Requirement cell: every limit the row is
+        held to. A limit that is blank says so."""
+        if all(c["limit"] is None for c in checks):
+            return NEEDS_INPUT, MUTED
+        parts = []
+        for c in checks:
+            if c["limit"] is None:
+                parts.append(f"{CHECK_LABELS[c['id']]}: {NEEDS_INPUT}")
+            else:
+                parts.append(self.REQUIREMENTS[c["id"]].format(c["limit"]))
+        return " / ".join(parts), NORMAL
 
     def refresh(self, s: AppState):
-        for level, _label, check_id in self.ROWS:
+        for level, _label, check_ids, judged in self.ROWS:
             cells, row = self.rows[level], s.level(level)
+            checks = [c for c in map(s.check, check_ids) if c is not None]
+            for key in ("v_mcu_l", "v_mcu_h"):
+                font = self.BOLD if row is not None and checks and key == judged else self.PLAIN
+                if tuple(cells[key].cget("font")) != font:
+                    cells[key].configure(font=font)
             if row is None:         # optional level, not given
                 _not_given(cells)
                 continue
             _show(cells["v_in"], row["v_in"], "{:.2f}", " V")
             _show(cells["v_mcu_l"], row["low"], "{:.3f}", " V")
             _show(cells["v_mcu_h"], row["high"], "{:.3f}", " V")
-            check = s.check(check_id) if check_id else None
-            if check is None:       # 0 V, Touch, or a Min Input that is not negative
+            if not checks:          # 0 V, Touch, or a Min Input that is not negative
                 _show_text(cells["thresh"], NOT_GIVEN, MUTED)
                 _show_text(cells["status"], "Zero ref" if level == "zero" else "info", MUTED)
             else:
-                if check["limit"] is None:
-                    _show_text(cells["thresh"], NEEDS_INPUT, MUTED)
-                else:
-                    _show_text(cells["thresh"],
-                               self.REQUIREMENTS[check_id].format(check["limit"]))
-                _show_status(cells["status"], check["status"])
+                _show_text(cells["thresh"], *self._requirement(checks))
+                # Max Input: the worse of Safe Max and Absolute Max
+                _show_status(cells["status"], s.worst_status(*check_ids))
 
 
 # ── Signal Bandwidth Results Tab ──────────────────────────────────────────────

@@ -593,6 +593,12 @@ class AppState:
                 return c
         return None
 
+    def worst_status(self, *check_ids: str) -> Optional[str]:
+        """The worst status among these checks, in the solver's order (FAIL,
+        "needs input", TIGHT, PASS). None when none of them has a status."""
+        checks = [self.check(check_id) for check_id in check_ids]
+        return solver.worst_status(c["status"] for c in checks if c is not None)
+
     def level(self, level_id: str) -> Optional[dict]:
         """{"v_in", "typ", "low", "high"} at an input level; None if not given."""
         return self.results["voltages"]["levels"].get(level_id)
@@ -606,9 +612,10 @@ class AppState:
     # ── Plot: sweep of the solver's pin-voltage function ──────────────────
 
     def _sweep(self):
-        """V_mcu against V_input as plain lists: the typical curve and the
-        highest of the 8 corners. The plot and the tables come from the same
-        function, so they cannot disagree."""
+        """V_mcu against V_input as plain lists: the typical curve, and the
+        lowest and the highest of the 8 corners (V_mcuL and V_mcuH of the
+        tables). The plot and the tables come from the same function, so
+        they cannot disagree. VIL and VIH are the solver's, passed on."""
         c = self.circuit
         vin_max, vin_min = c.v[solver.VIN_MAX], c.v["system.v_input_min"]
         typ_block = c.blocked("typ") + [p for p in c.cause[solver.VIN_MAX]
@@ -624,10 +631,13 @@ class AppState:
             v_in[-1] = vin_max
             data = {"v_in": v_in, "vin_min": start, "vin_max": vin_max,
                     "vdd": c.v[solver.VDD], "v_rec_max": c.v["mcu.v_recommended_max"],
-                    "v_abs_max": c.v["mcu.v_absolute_max"]}
+                    "v_abs_max": c.v["mcu.v_absolute_max"],
+                    "vil": self.results["voltages"]["vil"],
+                    "vih": self.results["voltages"]["vih"]}
             if not typ_block:
                 data["v_mcu_typ"] = [c.pin_voltage(x, "typ") for x in v_in]
             if not worst_block:
+                data["v_mcu_low"] = [c.pin_voltage(x, "low") for x in v_in]
                 data["v_mcu_worst"] = [c.pin_voltage(x, "high") for x in v_in]
             self.plot_data = data
 

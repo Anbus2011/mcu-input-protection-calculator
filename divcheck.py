@@ -68,7 +68,9 @@ def summary(name: str, data: dict, results: dict) -> str:
         f"VDD {_number(mcu['vdd'], 'V')}",
     ]
     for table, what in (("forward", "forward conduction"), ("reverse", "reverse conduction")):
-        if not diode[table]:
+        if diode[table] is None:        # null: not filled in yet, still needed
+            lines.append(f"  {table.capitalize()} table not filled in: needs input")
+        elif not diode[table]:          # []: this direction is not modelled
             lines.append(f"  No {table} data: {what} is not modelled")
     unchecked = [label for label, section in (("clamp diode", diode), ("MCU", mcu))
                  if not section["checked"]]

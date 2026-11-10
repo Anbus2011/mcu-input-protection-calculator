@@ -10,7 +10,9 @@ AppState changed it (load, new, fill, table rows, an unticked "checked" box).
 
 The Clamp Diode, MCU and System panels share one grid: a fixed label column,
 a field column, a unit column and a "?" column (with the slack between the
-unit and the "?"), so every row lines up.
+unit and the "?"), so every row lines up. The Resistors panel has the same
+label column, field column and "?" column; between them each resistor has
+its unit, rating and tolerance, named by a header row.
 """
 from __future__ import annotations
 
@@ -349,10 +351,10 @@ class _FieldPanel(ctk.CTkFrame):
     def _label(grid, text, row, sticky="w"):
         ctk.CTkLabel(grid, text=text, anchor="w").grid(row=row, column=0, sticky=sticky, pady=3)
 
-    def _help(self, grid, row, tip, key=None):
+    def _help(self, grid, row, tip, key=None, column=HELP_COL):
         if tip:
             btn = _help_btn(grid, tip, pack=False)
-            btn.grid(row=row, column=HELP_COL, sticky="e", padx=(4, 2))
+            btn.grid(row=row, column=column, sticky="e", padx=(4, 2))
             if key:
                 self.help[key] = btn
 
@@ -416,20 +418,60 @@ class _FieldPanel(ctk.CTkFrame):
 # ── Resistor Panel ────────────────────────────────────────────────────────────
 
 class ResistorPanel(_FieldPanel):
+    """R1, R2 and R_s, one row each: value, unit, power rating, tolerance.
+
+    The label column, the value (field) column and the "?" column are those
+    of the part panels' grid, so the three line up with the panels below. A
+    header row names the columns."""
+
+    # header, field key suffix, width
+    COLUMNS = (("Value", "value", FIELD_W), ("Unit", "unit", 70),
+               ("Rating (mW)", "rating", 68), ("Tol. (%)", "tol", 48))
+    HELP_COL = len(COLUMNS) + 2     # columns: label, the four fields, slack, "?"
+    ROWS = (
+        ("r1", "R1:",
+         "R1: from the input to the node (the junction with R2 and the\n"
+         "clamp diode).\n"
+         "Rating: its power rating. The worst-case power at Max Input is\n"
+         "checked against it.\n"
+         "Tol.: its tolerance. The worst case takes R1 at both ends of it."),
+        ("r2", "R2:",
+         "R2: from the node to GND.\n"
+         "Rating: its power rating. The worst-case power at Max Input is\n"
+         "checked against it.\n"
+         "Tol.: its tolerance. The worst case takes R2 at both ends of it."),
+        ("rs", "R_s:",
+         "R_s: optional series resistor from the node to the MCU pin.\n"
+         "Blank or 0 = no series resistor; rating and tolerance are then\n"
+         "not needed.\n"
+         "Its power is worked out with the pin held at 0 V."),
+    )
+
     def _build(self):
         ctk.CTkLabel(self, text="Resistors", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
-        for prefix, label in (("r1", "R1:"), ("r2", "R2:"), ("rs", "R_s:")):
-            row = ctk.CTkFrame(self, fg_color="transparent")
-            row.pack(fill="x", padx=10, pady=2)
-            ctk.CTkLabel(row, text=label, width=40).pack(side="left")
-            self._entry(row, f"{prefix}.value", 80).pack(side="left", padx=2)
-            self._unit_combo(row, f"{prefix}.unit").pack(side="left", padx=2)
-            ctk.CTkLabel(row, text="Rating:").pack(side="left", padx=(10, 2))
-            self._entry(row, f"{prefix}.rating", 60).pack(side="left", padx=2)
-            ctk.CTkLabel(row, text="mW").pack(side="left")
-            ctk.CTkLabel(row, text="Tol:").pack(side="left", padx=(10, 2))
-            self._entry(row, f"{prefix}.tol", 40).pack(side="left", padx=2)
-            ctk.CTkLabel(row, text="%").pack(side="left")
+        grid = self.grid_frame = ctk.CTkFrame(self, fg_color="transparent")
+        grid.pack(fill="x", padx=10, pady=(0, 2))
+        grid.grid_columnconfigure(0, minsize=LABEL_W)
+        grid.grid_columnconfigure(1, minsize=FIELD_W)
+        grid.grid_columnconfigure(self.HELP_COL - 1, weight=1)
+        grid.grid_columnconfigure(self.HELP_COL, minsize=HELP_W)
+
+        self.headers = []
+        for col, (text, _name, _width) in enumerate(self.COLUMNS, start=1):
+            header = ctk.CTkLabel(grid, text=text, anchor="w", text_color=MUTED,
+                                  font=("", 11), height=18)
+            header.grid(row=0, column=col, sticky="w", padx=(0 if col == 1 else 6, 0))
+            self.headers.append(header)
+
+        for row, (prefix, label, tip) in enumerate(self.ROWS, start=1):
+            self._label(grid, label, row)
+            for col, (_text, name, width) in enumerate(self.COLUMNS, start=1):
+                key = f"{prefix}.{name}"
+                field = (self._unit_combo(grid, key, width) if name == "unit"
+                         else self._entry(grid, key, width))
+                field.grid(row=row, column=col, sticky="w", pady=3,
+                           padx=(0 if col == 1 else 6, 0))
+            self._help(grid, row, tip, f"{prefix}.value", column=self.HELP_COL)
         ctk.CTkLabel(self, text="R_s blank or 0 = no series resistor.",
                      text_color=MUTED, font=("", 11)).pack(anchor="w", padx=10)
 
@@ -577,21 +619,12 @@ class ClampDiodePanel(_FieldPanel):
                               "Schottky to the rail: anode node, cathode vdd.\n"
                               "Schottky to GND: anode gnd, cathode node.", "diode.anode")
 
-        row = grid.next_row
-        grid.next_row += 1
-        self._label(grid, "Capacitance:", row)
-        pair = ctk.CTkFrame(grid, fg_color="transparent")
-        pair.grid(row=row, column=1, columnspan=HELP_COL, sticky="w", pady=3)
-        self._entry(pair, "diode.capacitance_pf", 64).pack(side="left")
-        ctk.CTkLabel(pair, text="pF").pack(side="left", padx=(4, 0))
-        self.help["diode.capacitance_pf"] = _help_btn(
-            pair, "Diode capacitance at 0 V bias, or the data-sheet maximum.\n"
+        # One row each, on the grid: field, unit and "?" where every row has them
+        self._row(grid, "Capacitance:", "diode.capacitance_pf", "pF",
+                  "Diode capacitance at 0 V bias, or the data-sheet maximum.\n"
                   "Used for the Signal Bandwidth time constant.")
-        ctk.CTkLabel(pair, text="Ptot:").pack(side="left", padx=(18, 0))
-        self._entry(pair, "diode.ptot_mw", 64).pack(side="left", padx=(6, 0))
-        ctk.CTkLabel(pair, text="mW").pack(side="left", padx=(4, 0))
-        self.help["diode.ptot_mw"] = _help_btn(
-            pair, "Power rating of the diode (total power dissipation).\n"
+        self._row(grid, "Ptot:", "diode.ptot_mw", "mW",
+                  "Power rating of the diode (total power dissipation).\n"
                   "The worst-case diode power at Max Input is checked against it.")
 
         self.tables = {}

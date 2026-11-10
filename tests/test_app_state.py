@@ -1068,6 +1068,48 @@ class TestPlot:
             vin = s.plot_data["v_in"][i]
             assert s.plot_data["v_mcu_worst"][i] == max(x["v"] for x in c.corners(vin))
 
+    def test_lowest_curve_is_the_lowest_of_the_corners(self):
+        """V_mcuL on the plot: the solver's pin-voltage function, "low" (the
+        same eight corners as the tables)."""
+        s = app_state(schottky_rail())
+        c = prepare(s.design)
+        p = s.plot_data
+        assert type(p["v_mcu_low"]) is list and len(p["v_mcu_low"]) == 200
+        assert all(type(x) is float for x in p["v_mcu_low"])
+        for i in (0, 20, 199):
+            vin = p["v_in"][i]
+            assert p["v_mcu_low"][i] == c.pin_voltage(vin, "low")
+            assert p["v_mcu_low"][i] == min(x["v"] for x in c.corners(vin))
+        assert all(lo <= hi for lo, hi in zip(p["v_mcu_low"], p["v_mcu_worst"]))
+        assert p["v_mcu_low"] == sorted(p["v_mcu_low"])     # never falls as the input rises
+
+    @pytest.mark.parametrize("design", [zener_reference, schottky_rail, schottky_gnd])
+    def test_band_ends_at_the_max_input_row_of_the_tables(self, design):
+        s = app_state(design())
+        row = s.level("max_input")
+        assert s.plot_data["v_mcu_low"][-1] == row["low"]
+        assert s.plot_data["v_mcu_worst"][-1] == row["high"]
+        assert s.plot_data["v_mcu_typ"][-1] == row["typ"]
+
+    def test_lowest_curve_needs_the_worst_case_inputs(self):
+        s = ref_state()
+        s.set_field("r1.tol", "")
+        assert "v_mcu_typ" in s.plot_data
+        assert "v_mcu_low" not in s.plot_data and "v_mcu_worst" not in s.plot_data
+        s.set_field("r1.tol", "1")
+        s.set_cell("reverse", 0, "v_typ", "")
+        assert "v_mcu_low" in s.plot_data and "v_mcu_typ" not in s.plot_data
+
+    def test_logic_thresholds_are_handed_to_the_plot(self):
+        """VIL and VIH for the plot are the solver's, not worked out again."""
+        s = ref_state()
+        p = s.plot_data
+        assert p["vil"] == s.results["voltages"]["vil"] == pytest.approx(0.99)
+        assert p["vih"] == s.results["voltages"]["vih"] == pytest.approx(2.31)
+        s.set_field("mcu.vih_factor", "")
+        assert s.plot_data["vih"] is None and s.plot_data["vil"] == pytest.approx(0.99)
+        assert "v_mcu_typ" in s.plot_data            # the curves don't wait for it
+
     def test_each_curve_needs_its_own_inputs(self):
         s = ref_state()
         s.set_field("r1.tol", "")
@@ -1099,6 +1141,25 @@ class TestPlot:
         s = ref_state()
         assert any("did not settle at" in w and "plot point" in w for w in s.report.warnings)
         assert any("Max Input 30 V" in w for w in s.report.warnings)
+
+
+def test_worst_status_of_several_checks():
+    """The Max Input row of the Input Levels tab is judged on Safe Max and
+    Absolute Max together: the worse of the two, in the verdict's order."""
+    s = app_state(schottky_rail())
+    assert s.check("pin_max_safe")["status"] == FAIL and s.check("pin_max_abs")["status"] == PASS
+    assert s.worst_status("pin_max_safe", "pin_max_abs") == FAIL
+    assert s.worst_status("pin_max_abs") == PASS
+    s.set_field("mcu.v_recommended_max", "3.67")
+    assert s.worst_status("pin_max_safe", "pin_max_abs") == "TIGHT"
+    s.set_field("mcu.v_recommended_max", "")
+    assert s.worst_status("pin_max_safe", "pin_max_abs") == NEEDS_INPUT
+    s.set_field("mcu.v_absolute_max", "3.6")
+    assert s.worst_status("pin_max_safe", "pin_max_abs") == FAIL    # FAIL outranks "needs input"
+    assert s.worst_status("pin_min") is None                         # a check that is not made
+    # the solver's own ordering, not a second one
+    src = inspect.getsource(AppState.worst_status)
+    assert "solver.worst_status" in src
 
 
 def test_path_labels():
