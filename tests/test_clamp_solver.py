@@ -148,7 +148,7 @@ class TestReferenceNumbers:
 
 class TestSchottkyToRail:
     def test_hand_check_maximum_column(self):
-        """VDD 3.3 V, 10 kΩ / 18 kΩ, 30 V in, maximum column: about 2.44 mA,
+        """VDD 3.3 V, 10 kΩ / 18 kΩ, 30 V in, maximum column: about 2.43 mA,
         about 0.35 V across the diode, about 3.65 V at the pin."""
         d = solve(schottky_rail())["details"]
         v = d["v_pin_diode_max"]

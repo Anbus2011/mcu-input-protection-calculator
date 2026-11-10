@@ -30,14 +30,14 @@ V_input ── R1 ──┬── R_series ──> MCU GPIO Pin
 ## Features
 
 - **Real-time calculation** - all outputs update as inputs change
-- **Clamp diode from data-sheet points** - the diode is described by two tables (forward and reverse) of current against voltage, minimum / typical / maximum, so a Zener and a Schottky are handled by the same solver
+- **Clamp diode from data-sheet points** - the diode is described by two tables (forward and reverse) of current against voltage, minimum / typical / maximum, so a Zener and a Schottky are handled the same way
 - **Worst case from all corners** - R1 min/max × R2 min/max × diode minimum/maximum column; the lowest or highest is used as each check requires
 - **Checks with one verdict** - pin voltage against Safe Max, Absolute Max and Pin Min, logic levels, power in every part, analog range and error, required frequency
 - **Signal bandwidth in two numbers** - "may work up to" and "reliable up to"
 - **Interactive plot** - V_mcu vs V_input with the typical, lowest and highest traces, the band between them, and the VIH / VIL levels; dark/light theme toggle
-- **`.div` files, format 2.0** - JSON; holds every input, the part data with its source, and the solver's results
-- **Command-line checker** - `divcheck.py` validates and solves a `.div` file with the same solver, without the GUI packages
-- **No hidden defaults, no presets** - blank inputs stay blank; results that need them say "needs input"
+- **`.div` files, format 2.0** - JSON; holds every input, the part data with its source, and the calculated results
+- **Command-line checker** - `divcheck.py` validates and solves a `.div` file with the same calculation, without the GUI packages
+- **No hidden defaults** - blank inputs stay blank; results that need them say "needs input"
 - **Color-coded status indicators** - green / orange / red throughout the tables
 
 ---
@@ -56,7 +56,7 @@ V_input ── R1 ──┬── R_series ──> MCU GPIO Pin
 | `pillow` | Image processing support |
 | `pytest` | Running the test suite |
 
-The solver and `divcheck.py` need none of these: a plain Python install is enough. The test suite needs all of them installed, the tests that don't open a window included: one non-UI test imports the plot module, and pytest imports `tests/test_ui.py` to collect it even when its tests are deselected. Only the UI tests also need a desktop session.
+The test suite needs all of them, the tests that don't open a window included. Only the UI tests also need a desktop session.
 
 ---
 
@@ -90,7 +90,7 @@ pip install -r requirements.txt
 Or install manually:
 
 ```bash
-pip install customtkinter matplotlib numpy pillow
+pip install customtkinter matplotlib numpy pillow pytest
 ```
 
 ### 4. Run the application
@@ -116,6 +116,8 @@ The window is split into two panels:
 - **Left panel** (scrollable) - all input parameters
 - **Right panel** - the overall verdict, an input report line, the output tabs and the plot
 
+Most fields and table headers have a **?** at the right. Hold the pointer on it for about half a second and a tooltip appears beside the pointer, never under it. One tooltip is shown at a time. It goes when the pointer leaves, and on a click, a scroll, a change of tab, a move or resize of the window, or when the app loses focus.
+
 ### No Hidden Defaults
 
 The app starts with a blank design, and **New Design** gives a blank design. Nothing is ever filled in behind your back:
@@ -124,19 +126,22 @@ The app starts with a blank design, and **New Design** gives a blank design. Not
 - Results that don't depend on a blank field are still calculated.
 - Text that isn't a valid number, or a value that can't be used (negative resistance, tolerance outside 0 to below 100 %, table rows out of order, a rating of 0, ...), is listed as `Fix: <field>: <reason>`, and results that depend on it show **needs input**.
 - Unreadable text blocks Save until it's fixed or cleared; the error names the field.
-- The only values the app fills in itself are visible ones: the two Signal Bandwidth starting values (see below). A new design also shows kΩ / kΩ / Ω in the unit selectors.
-- There are no part presets. Every clamp diode and MCU value comes from the `.div` file or from typing it in.
+- The only values the app fills in itself are visible ones: the two Signal Bandwidth starting values (see [Starting Values](#starting-values)). A new design also shows kΩ / kΩ / Ω in the unit selectors.
+- Every clamp diode and MCU value comes from the `.div` file or from typing it in.
 
 ### Input Panels
 
+The labels, the value fields and the "?" buttons of all the panels line up.
+
 #### Resistors
 
-Enter values for R1, R2, and the optional R_series. Each resistor has:
-- **Value** with unit selector (Ω, kΩ or MΩ)
-- **Power rating** (mW) - used to calculate margin percentage
-- **Tolerance** (%) - used for worst-case analysis
+One row each for R1, R2 and the optional R_series:
 
-Each resistor is one row under the headers Value, Unit, Rating (mW) and Tol. (%), with a "?" at the right. The labels, the value fields and the "?" buttons line up with those of the panels below.
+| Column | Description |
+|--------|-------------|
+| Value, Unit | Resistance, in Ω, kΩ or MΩ |
+| Rating (mW) | Power rating, used for the power margins |
+| Tol. (%) | Tolerance, used for the worst case |
 
 R_series blank or 0 means there is no series resistor; its unit, rating and tolerance are then not needed, and the R_s row of the power table shows "no R_s". When R_series is above 0 all three are needed.
 
@@ -178,7 +183,7 @@ Each table is in one of three states, and the panel says which:
 
 The **Not modelled** box next to "+ Add row" switches a table with no rows between blank and not modelled. Adding a row turns either into rows; deleting the last row returns the table to blank.
 
-Between two rows the solver takes ln(current) as linear in voltage; below the first row and above the last it extends the nearest segment. So enter rows over the whole range of currents the design can reach. V min is the part that conducts most and V max the part that conducts least; fold temperature extremes into those two columns.
+Between two rows, ln(current) is taken as linear in voltage; below the first row and above the last, the nearest segment is extended. So enter rows over the whole range of currents the design can reach. V min is the part that conducts most and V max the part that conducts least; fold temperature extremes into those two columns.
 
 #### MCU Pin Input Limits
 
@@ -221,6 +226,8 @@ The line above the tabs shows the worst status among all the checks: **FAIL**, e
 
 ### Output Tabs
 
+V_mcuL and V_mcuH are the lowest and the highest pin voltage over all eight corners: R1 min or max × R2 min or max × the diode's minimum or maximum column.
+
 #### Tab 1: Component Analysis
 
 The tab scrolls, so that the plot under it keeps its height.
@@ -228,9 +235,9 @@ The tab scrolls, so that the plot under it keeps its height.
 - **Divider Network** - input impedance, divider ratio, ADC source impedance (R1∥R2 + R_s), total typical power dissipation (R1 + R2 + clamp diode)
 - **Component Power** - for R1, R2, the clamp diode and R_s at max input: typical current, typical power, worst-case power, rating, and margin % against both the typical and the worst-case power
 - **Power verdict (worst case)** - the worst status of the parts
-- **Voltage at MCU Pin (nominal R1/R2)** - "Typical clamp diode" (typical column) and "Worst clamp diode (nominal R)" (maximum column) at maximum input voltage, with R1 and R2 at their nominal values. This is not the full worst case: that is V_mcuH on the MCU Input tab, which is why the baseline shows 3.235 V here and 3.239 V there.
+- **Voltage at MCU Pin (nominal R1/R2)** - "Typical clamp diode" (typical column) and "Worst clamp diode (nominal R)" (maximum column) at maximum input voltage, with R1 and R2 at their nominal values. This is not the full worst case: that is V_mcuH on the MCU Input tab (the Zener example shows 3.235 V here and 3.239 V there).
 
-Typical power uses nominal resistors and the diode's typical column. Worst-case power is the highest value over the eight corners (R1 min or max × R2 min or max × the diode's minimum or maximum column) plus the typical point, taken separately for each part.
+Typical power uses nominal resistors and the diode's typical column. Worst-case power is the highest value over the eight corners plus the typical point, taken separately for each part.
 
 R_s power takes the pin as held at 0 V, so the whole node voltage is across R_s: typical V² / R_s, worst case (highest node voltage)² / R_s at its low tolerance.
 
@@ -243,14 +250,14 @@ Margin indicators (worst-case margin column and the power verdict):
 
 #### Tab 2: MCU Input
 
-- **Voltage Limits** - at Max Input, V_mcuH (the highest pin voltage over all corners) against Safe Max and Absolute Max; at a negative Min Input, V_mcuL against Pin Min. Margin in mV and status. Safe Max is the guard against injection into the pin; there is no separate injection-current estimate.
+- **Voltage Limits** - at Max Input, V_mcuH against Safe Max and Absolute Max; at a negative Min Input, V_mcuL against Pin Min. Margin in mV and status. Safe Max is the guard against injection into the pin.
 - **ADC Performance** - source impedance and resolution in mV/LSB (VREF / 2^N referred to the divider input)
 - **Analog Error** - at ADC Scale with nominal resistors: the pin voltage with the diode minus the pin voltage without it, in mV, percent and LSB. It has a status only when an allowed error is given.
 - **Information (no verdict)** - at the Touch voltage: highest pin voltage, clamp diode current and R1 power; and the current into the VDD rail at Max Input when the diode is connected to VDD
 
 #### Tab 3: Input Levels
 
-The MCU pin voltage at each input level:
+The MCU pin voltage at each input level, as **V_mcuL** and **V_mcuH**:
 
 | Level | Check |
 |-------|-------|
@@ -262,9 +269,9 @@ The MCU pin voltage at each input level:
 | Max Input | V_mcuH against Safe Max and Absolute Max. Both limits are shown ("≤ 3.60 V safe / ≤ 4.00 V abs") and the status is the worse of the two, so the row agrees with the overall verdict |
 | Touch | Information only |
 
-Each row shows **V_mcuL** and **V_mcuH**, the lowest and highest pin voltage over all eight corners. The value a row is judged on is in bold: V_mcuL for Logic High and Min Input, V_mcuH for Logic Low, ADC Scale and Max Input. Rows with no check (0V, Touch, a Min Input that is not negative) have nothing in bold. Rows whose input is not given show "--".
+The value a row is judged on is in bold; rows with no check (0V, Touch, a Min Input that is not negative) have nothing in bold. Rows whose input is not given show "--".
 
-The pin voltage is solved by bisection to 1 nV on the node equation (current through R1 = current through R2 + diode current). If the bisection can't bracket a solution, the report line says "did not settle" and names the input levels affected.
+If no pin voltage can be found at a level, the report line says "did not settle" and names the input levels affected; those voltages are not reliable.
 
 #### Tab 4: Signal Bandwidth
 
@@ -273,36 +280,38 @@ Answers one question: what input frequency can this pin handle, for uses such as
 - **May work up to** = 1 / (2 × (edge time + minimum pulse width))
 - **Reliable up to** = "may work up to" ÷ margin factor
 - **Required** (when a required frequency is given in the System panel): PASS at or below "reliable", TIGHT between the two, FAIL above "may work". It is also FAIL when the pin never reads high or low
-- **Details** opens the values behind the numbers: time constant, total capacitance, the two edge times and the shortest usable pulse
+- **Details** opens the values behind the numbers: time constant, total capacitance, the two edge times and the shortest usable pulse (edge time + minimum pulse width)
 
 How the edge time is found:
 
 - τ = (R1 max ∥ R2 max + R_s max) × (C_diode + C_pin + C_stray)
 - An edge from pin level A towards level B crosses threshold T after τ × ln((B − A) / (B − T))
-- Rising edge: from 0 V towards the lowest pin voltage at Logic High, to VIH
-- Falling edge: from the highest pin voltage at Max Input towards the highest pin voltage at Logic Low, to VIL
+- Rising edge: from 0 V towards V_mcuL at Logic High, to VIH
+- Falling edge: from V_mcuH at Max Input towards V_mcuH at Logic Low, to VIL
 - The edge time is the longer of the two
 
 If the pin never gets above VIH at the Logic High input (or below VIL at Logic Low), the tab says so and shows no limits.
 
-Entered on the tab: **C_stray** (PCB estimate) and the **margin factor**. They start from visible starting values (see `BANDWIDTH_STARTING_VALUES` below). **Fill from starting values** puts the starting value back into a blank or unreadable field and leaves the others alone. C_diode is the clamp diode's capacitance; C_pin and the minimum pulse width are in the MCU panel.
+Entered on the tab: **C_stray** (PCB estimate) and the **margin factor**. Both start from visible starting values (see [Starting Values](#starting-values)). **Fill from starting values** puts the starting value back into a blank or unreadable field and leaves the others alone. C_diode is the clamp diode's capacitance; C_pin and the minimum pulse width are in the MCU panel.
 
 ### Plot
 
 The bottom of the right panel shows **V_mcu vs V_input**, from 0 V (or a negative Min Input) to Max Input:
 
 - **Cyan line** - typical V_mcu (nominal resistors, typical diode column)
-- **Orange line** - V_mcuH, the highest of all corners
-- **Violet line** - V_mcuL, the lowest of all corners
+- **Orange line** - V_mcuH
+- **Violet line** - V_mcuL
 - **Shaded band** - between V_mcuL and V_mcuH: where the pin voltage can lie
 - **Red dashed** - Absolute Max threshold
 - **Gold dashed** - Safe Max threshold
 - **Green dashed** - VDD threshold
 - **Thin pink lines** - VIH (dash-dot) and VIL (dotted), each named at its right end. Where the V_mcuL curve is under the VIH line, the input does not read high
 
-The legend is to the right of the plot area, so it never covers a curve, and lists the lines in this order. The plot is about 360 px high in a 1400×900 window.
+The legend is to the right of the plot area, so it never covers a curve, and lists the lines in this order. The plot is at least 350 px high in a 1400×900 window, whichever tab is open.
 
-Each curve and line is drawn only when its inputs are present; V_mcuL, V_mcuH and the band need the tolerances and both outer diode columns. When no curve can be calculated, the plot is cleared and says which inputs are needed. The curves come from the same solver function as the tables.
+Each curve and line is drawn only when its inputs are present; V_mcuL, V_mcuH and the band need the tolerances and both outer diode columns. When no curve can be calculated, the plot is cleared and says which inputs are needed. The curves and the tables come from the same calculation, so they agree.
+
+If no pin voltage can be found at some points of a curve, the report line says "Clamp diode solver did not settle at N plot point(s). The curve is not reliable there." N counts plot points, each once.
 
 Use the **Theme** dropdown to switch between Dark and Light plot styles.
 
@@ -317,13 +326,12 @@ Use the **Theme** dropdown to switch between Dark and Light plot styles.
 
 The title bar shows the current filename and an asterisk (*) when there are unsaved changes. Any edit to any input (typing, paste, cut, delete, the notes, a checkbox, a selector, a table cell, adding or deleting a table row) marks the design unsaved. The application prompts to save before closing, opening, or creating a new file.
 
-- Saving writes a temporary file and then replaces the target, so a failed save never truncates the existing file. Save and Save As both report a failure. The solver's results are saved with the design.
-- Opening checks the whole file first. Every format problem (wrong type, missing or unknown key, unknown unit) is listed with its key path, and the current design is left exactly as it was.
+- Saving writes a temporary file and then replaces the target, so a failed save never truncates the existing file. Save and Save As both report a failure. The calculated results are saved with the design.
+- Opening checks the whole file first. Every format problem (wrong type, missing or unknown key, or a unit, terminal or diode type that is not an allowed value) is listed with its key path, and the current design is left exactly as it was.
 - A value that is readable but can't be used (out of range, table rows out of order) still opens; it is listed after `Fix:`.
 - `null` values load blank; one warning lists those the results need.
 - Stored results are ignored when a file is opened: the design is solved again.
 - A file that is opened and saved without editing gets every input back exactly as it was written (`10` stays `10`, `10.0` stays `10.0`, `null` stays `null`). A value you edit is written as you entered it. Only `results` can change.
-- Format 1.0 files (from before version 2.0 of the format) are not read, and there is no converter.
 
 ---
 
@@ -334,7 +342,7 @@ Designs are saved as `.div` files: JSON, format 2.0. The format is described in 
 - `examples/zener_gnd_bzb984_c3v3.div` - Zener to GND
 - `examples/schottky_rail_bat54cv.div` - Schottky to the VDD rail
 
-In short: every key must be present, `null` means blank, unknown keys are errors, and `results` is written by the solver.
+In short: every key must be present, `null` means blank, unknown keys are errors, and `results` is written by the app and the checker.
 
 ### Command-Line Checker
 
@@ -342,14 +350,16 @@ In short: every key must be present, `null` means blank, unknown keys are errors
 python divcheck.py in.div [out.div] [--json out.json]
 ```
 
-Validates the file, solves it with the same solver the app uses, and prints a summary. With `out.div` it writes the file back with `results` filled in; with `--json` it writes the results alone. Exit code 0: valid and solved, whatever the statuses. 1: invalid, with every problem listed. 2: a file could not be read or written. It needs only a plain Python install.
+Validates the file, solves it with the same calculation the app uses, and prints a summary. With `out.div` it writes the file back with `results` filled in; with `--json` it writes the results alone. Exit code 0: valid and solved, whatever the statuses. 1: invalid, with every problem listed (the value problems that the app opens and lists after `Fix:` included). 2: a file could not be read or written. It needs only a plain Python install.
+
+The summary tells a blank diode table from one that is not modelled: "Forward table not filled in: needs input" against "No forward data: forward conduction is not modelled" (and the same for the reverse table).
 
 ---
 
 ## Project Structure
 
 ```
-mcu_input_calculator/
+mcu-input-protection-calculator/
 ├── main.py                       # Application entry point
 ├── divcheck.py                   # Command-line checker for .div files
 ├── requirements.txt              # Python dependencies
@@ -360,7 +370,7 @@ mcu_input_calculator/
 │
 ├── docs/
 │   ├── div_v2_format.md          # The .div format 2.0
-│   ├── test_changes.md           # Tests removed or rewritten since the 401-test suite, with reasons
+│   ├── test_changes.md           # Record of tests removed or rewritten, with reasons
 │   ├── session2_prompt.md        # Historical brief, superseded in part, kept as a record
 │   ├── bzb984_fig7_typical.json  # Graph readings behind the Zener example's table (read by the tests)
 │   └── bat54cv_fig1_fig2_typical.json   # Graph readings behind the Schottky example's tables
@@ -395,7 +405,7 @@ mcu_input_calculator/
 
 The application follows a **Model-View-Controller** pattern:
 
-- **Model** (`src/models/clamp_solver.py`) is the one solver. `solve(design)` takes the design as a dict in the layout of a `.div` file and returns the results as a dict. Any value may be `None` (blank); each result is calculated only when its inputs are present, and the missing inputs are reported per result. The app, `divcheck.py` and the tests all call this function.
+- **Model** (`src/models/clamp_solver.py`) is the one solver. `solve(design)` takes the design as a dict in the layout of a `.div` file and returns the results as a dict. Any value may be `None` (blank); each result is calculated only when its inputs are present, and the missing inputs are reported per result. The pin voltage is found by bisection on the node equation (current through R1 = current through R2 + diode current). The app, `divcheck.py` and the tests all call this solver.
 - **View** (`src/ui/`) contains all CustomTkinter widgets. Every input is bound to a Tk variable whose trace forwards the raw text to the controller. Output panels display the solver's results; they don't parse or calculate.
 - **Controller** (`src/core/app_state.py`) owns the text of every field and table cell, parses it, builds the design dict, calls the solver, sweeps the solver over the input range for the plot (the typical curve from its pin-voltage function, the lowest and the highest from its eight corners, solved once per point), and dispatches results back to the view via callbacks.
 
@@ -403,16 +413,12 @@ The application follows a **Model-View-Controller** pattern:
 
 ## Starting Values
 
-`BANDWIDTH_STARTING_VALUES` in `src/core/constants.py` sets the values a new design shows in the two Signal Bandwidth fields, and what **Fill from starting values** puts back. Keep a one-line source note above each value:
+A new design shows two values in the Signal Bandwidth fields, and **Fill from starting values** puts them back. They are set in `BANDWIDTH_STARTING_VALUES` in `src/core/constants.py`, each with a one-line source note:
 
-```python
-BANDWIDTH_STARTING_VALUES = {
-    # Engineering estimate for a short PCB trace (2-5 pF typical); no datasheet source
-    "c_stray_pf": 3,
-    # owner's example, 2026-11-09: 1 MHz reliable, 1.5 MHz may work
-    "margin_factor": 1.5,
-}
-```
+| Field | Starting value | Source |
+|-------|----------------|--------|
+| C_stray | 3 pF | Estimate for a short PCB trace (2-5 pF typical); no data-sheet source |
+| Margin factor | 1.5 | 1.5 MHz "may work" gives 1 MHz "reliable" |
 
 Everything else about a part (diode tables, capacitance, MCU limits, pin capacitance, minimum pulse width) is entered per design and saved in the `.div` file. To use a different diode or MCU, enter its data-sheet values or open a file that has them; there is nothing to add to the source code.
 
