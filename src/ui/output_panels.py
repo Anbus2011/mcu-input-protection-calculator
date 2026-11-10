@@ -409,50 +409,127 @@ class OperatingTab:
 
 # ── Signal Bandwidth Results Tab ──────────────────────────────────────────────
 
+def format_frequency(hz: float) -> str:
+    """A frequency for the screen: "1.347 MHz", "898.0 kHz", "950 Hz"."""
+    if hz >= 1e6:
+        return f"{hz / 1e6:.3f} MHz"
+    if hz >= 1e3:
+        return f"{hz / 1e3:.1f} kHz"
+    return f"{hz:.0f} Hz"
+
+
 class BandwidthTab:
-    """What input frequency the pin can handle (at the pin, 50 % duty)."""
+    """What input frequency can a pin with this divider and diode handle?
+    Two numbers, "may work up to" and "reliable up to"; the required
+    frequency with its status when one is given; and a Details control for
+    the values behind them."""
+
+    QUESTION = "Input frequency this pin can handle"
+    CAPTION = ("For pulse inputs and encoders: the frequency at the pin (per channel "
+               "for an encoder), at 50 % duty.")
+    DETAILS_CLOSED, DETAILS_OPEN = "Details ▸", "Details ▾"
 
     def __init__(self, parent: ctk.CTkFrame):
         self._build(parent)
 
     def _build(self, parent):
-        cw = [200, 120, 80]
-        ft = _section(parent, "RC Filter", first=True)
-        _table_header(ft, ["Parameter", "Value", "Unit"], cw)
-        self.c_total = _table_row(ft, "C_total", "pF", 1, cw)
-        self.tau = _table_row(ft, "Time constant (τ)", "ns", 2, cw)
+        ctk.CTkLabel(parent, text=self.QUESTION, font=("", 13, "bold")).pack(
+            anchor="w", padx=10, pady=(10, 0))
+        ctk.CTkLabel(parent, text=self.CAPTION, text_color=MUTED, font=("", 11),
+                     justify="left", wraplength=440).pack(anchor="w", padx=10, pady=(0, 6))
 
-        tt = _section(parent, "Edge Timing")
-        _table_header(tt, ["Parameter", "Value", "Unit"], cw)
-        self.t_rise = _table_row(tt, "Rising edge to VIH", "ns", 1, cw)
-        self.t_fall = _table_row(tt, "Falling edge to VIL", "ns", 2, cw)
-        self.t_shortest = _table_row(tt, "Shortest usable pulse", "ns", 3, cw)
+        grid = ctk.CTkFrame(parent, fg_color="transparent")
+        grid.pack(fill="x", padx=10)
 
-        lt = _section(parent, "Input Frequency")
-        _table_header(lt, ["Limit", "Value", "Unit"], cw)
-        self.f_may_work = _table_row(lt, "May work up to", "kHz", 1, cw)
-        self.f_reliable = _table_row(lt, "Reliable up to", "kHz", 2, cw)
+        def row(i, label, tip, big):
+            name = ctk.CTkFrame(grid, fg_color="transparent")
+            name.grid(row=i, column=0, sticky="w", pady=3)
+            ctk.CTkLabel(name, text=label, font=("", 13), width=120, anchor="w").pack(side="left")
+            tip_btn = ctk.CTkLabel(name, text="?", width=16, height=16,
+                                   fg_color=("gray65", "gray45"), corner_radius=8,
+                                   font=("", 10, "bold"), text_color=("gray20", "gray90"),
+                                   cursor="hand2")
+            tip_btn.pack(side="left", padx=(3, 8))
+            _Tooltip(tip_btn, tip)
+            value = ctk.CTkLabel(grid, text=NEEDS_INPUT, anchor="w", width=150,
+                                 font=("", 20 if big else 13, "bold"), text_color=MUTED)
+            value.grid(row=i, column=1, sticky="w", padx=(0, 10))
+            return value
+
+        self.f_may_work = row(
+            0, "May work up to",
+            "1 / (2 × (edge time + minimum pulse width)).\n"
+            "The edge time is the longer of the rising edge (0 V to VIH) and the\n"
+            "falling edge (from the Max Input level down to VIL), with the\n"
+            "slowest resistors: R1, R2 and R_s at their high tolerance.", True)
+        self.f_reliable = row(
+            1, "Reliable up to",
+            "\"May work up to\" divided by the margin factor (Board, on the left).", True)
+        self.required_value = row(
+            2, "Required",
+            "The required frequency (System panel), if one is given.\n"
+            "PASS: at or below \"reliable up to\".\n"
+            "TIGHT: between \"reliable up to\" and \"may work up to\".\n"
+            "FAIL: above \"may work up to\".", False)
+        self.required_status = ctk.CTkLabel(grid, text=NOT_GIVEN, anchor="w",
+                                            font=("", 13, "bold"), text_color=MUTED)
+        self.required_status.grid(row=2, column=2, sticky="w")
 
         self.note = ctk.CTkLabel(parent, text="", text_color="red", justify="left",
-                                 anchor="w", wraplength=420)
-        self.note.pack(anchor="w", padx=10, pady=(8, 5))
+                                 anchor="w", wraplength=440)
+        self.note.pack(anchor="w", padx=10, pady=(6, 2))
+
+        self.details_button = ctk.CTkButton(parent, text=self.DETAILS_CLOSED, width=90,
+                                            height=24, fg_color="gray40",
+                                            hover_color="gray30", command=self.toggle_details)
+        self.details_button.pack(anchor="w", padx=10, pady=(4, 2))
+        self.details_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        cw = [200, 120, 60]
+        _table_header(self.details_frame, ["Parameter", "Value", "Unit"], cw)
+        self.tau = _table_row(self.details_frame, "Time constant (τ)", "ns", 1, cw)
+        self.c_total = _table_row(self.details_frame, "Total capacitance", "pF", 2, cw)
+        self.t_rise = _table_row(self.details_frame, "Rising edge to VIH", "ns", 3, cw)
+        self.t_fall = _table_row(self.details_frame, "Falling edge to VIL", "ns", 4, cw)
+        self.t_shortest = _table_row(self.details_frame, "Shortest usable pulse", "ns", 5, cw)
+
+    @property
+    def details_shown(self) -> bool:
+        return self.details_frame.winfo_manager() != ""
+
+    def toggle_details(self):
+        if self.details_shown:
+            self.details_frame.pack_forget()
+            self.details_button.configure(text=self.DETAILS_CLOSED)
+        else:
+            self.details_frame.pack(fill="x", padx=10, pady=(2, 8))
+            self.details_button.configure(text=self.DETAILS_OPEN)
 
     def refresh(self, s: AppState):
         d = s.details
         note = d["frequency_note"]
 
-        def cell(label, value, fmt):
-            if value is None and note:
+        def cell(label, value, fmt="{:.2f}"):
+            if value is None and note:      # no limit: the pin never reads high (or low)
                 label.configure(text=BLOCKED, text_color="red")
+            elif value is None:
+                label.configure(text=NEEDS_INPUT, text_color=MUTED)
             else:
-                _show(label, value, fmt)
+                label.configure(text=fmt(value) if callable(fmt) else fmt.format(value),
+                                text_color=NORMAL)
 
-        khz = lambda v: None if v is None else v / 1e3
-        _show(self.c_total, d["c_total_pf"], "{:.1f}")
-        _show(self.tau, d["tau_ns"], "{:.2f}")
-        cell(self.t_rise, d["t_rise_ns"], "{:.2f}")
-        cell(self.t_fall, d["t_fall_ns"], "{:.2f}")
-        cell(self.t_shortest, d["t_pulse_shortest_ns"], "{:.2f}")
-        cell(self.f_may_work, khz(d["f_may_work_hz"]), "{:.1f}")
-        cell(self.f_reliable, khz(d["f_reliable_hz"]), "{:.1f}")
+        cell(self.f_may_work, d["f_may_work_hz"], format_frequency)
+        cell(self.f_reliable, d["f_reliable_hz"], format_frequency)
+        check = s.check("frequency")
+        if check is None:                   # no required frequency given
+            _show_text(self.required_value, NOT_GIVEN, MUTED)
+            _show_text(self.required_status, "", MUTED)
+        else:
+            _show_text(self.required_value, format_frequency(check["value"]))
+            _show_status(self.required_status, check["status"])
         self.note.configure(text=note or "")
+
+        _show(self.tau, d["tau_ns"], "{:.2f}")
+        _show(self.c_total, d["c_total_pf"], "{:.1f}")
+        cell(self.t_rise, d["t_rise_ns"])
+        cell(self.t_fall, d["t_fall_ns"])
+        cell(self.t_shortest, d["t_pulse_shortest_ns"])

@@ -173,7 +173,8 @@ def output_labels(w):
     return out
 
 
-BW_CELLS = ("c_total", "tau", "t_rise", "t_fall", "t_shortest", "f_may_work", "f_reliable")
+BW_CELLS = ("f_may_work", "f_reliable", "required_value",
+            "tau", "c_total", "t_rise", "t_fall", "t_shortest")
 
 
 def text(lbl):
@@ -489,12 +490,8 @@ def test_example_file_gives_frequency_outputs(w, dialogs):
     labels = output_labels(w)
     for name in BW_CELLS:
         assert text(labels[f"bw.{name}"]) not in (NEEDS_INPUT, BLOCKED, ""), name
-    assert text(w.bandwidth_tab.f_may_work) == "1346.9"
-    assert text(w.bandwidth_tab.f_reliable) == "898.0"
-    d = w.bw_input_panel.derived
-    assert text(d["c_diode_pf"]) == "10" and text(d["c_pin_pf"]) == "5"
-    assert text(d["t_pulse_min_ns"]) == "17.65"
-    assert text(d["vil_v"]) == "0.990" and text(d["vih_v"]) == "2.310"
+    assert text(w.bandwidth_tab.f_may_work) == "1.347 MHz"
+    assert text(w.bandwidth_tab.f_reliable) == "898.0 kHz"
     assert not w.app_state.is_dirty
     # the fill button puts back only what is blank
     type_into(w, "bw.c_stray_pf", "")
@@ -506,14 +503,115 @@ def test_example_file_gives_frequency_outputs(w, dialogs):
 
 
 def test_pin_never_reads_high_shown_on_tab(w):
+    """The tab says so and shows no limits."""
     load_reference(w)                       # 3.8 V Logic High: pin 1.83 V < VIH 2.31 V
-    assert "never reads high" in text(w.bandwidth_tab.note)
-    assert text(w.bandwidth_tab.f_reliable) == BLOCKED
-    assert text(w.bandwidth_tab.f_may_work) == BLOCKED
-    assert text(w.bandwidth_tab.tau) not in (NEEDS_INPUT, BLOCKED)
+    b = w.bandwidth_tab
+    assert text(b.note).startswith("The pin never reads high")
+    assert text(b.f_reliable) == BLOCKED and text(b.f_may_work) == BLOCKED
+    assert text(b.t_rise) == BLOCKED and text(b.t_shortest) == BLOCKED
+    assert text(b.tau) == "2973.73" and text(b.c_total) == "458.0"
+    type_into(w, "system.f_required_hz", "1000")
+    assert text(b.required_value) == "1.0 kHz" and text(b.required_status) == "✗ FAIL"
     type_into(w, "system.v_logic_high_min", "24")
-    assert text(w.bandwidth_tab.note) == ""
-    assert text(w.bandwidth_tab.f_reliable) not in (NEEDS_INPUT, BLOCKED)
+    assert text(b.note) == ""
+    assert text(b.f_reliable) == "55.2 kHz" and text(b.f_may_work) == "82.9 kHz"
+    assert text(b.required_status) == "✓ PASS"
+
+
+def test_pin_never_reads_low_shown_on_tab(w):
+    load_design(w, schottky_rail(system__v_logic_low_max=1.6))
+    b = w.bandwidth_tab
+    assert text(b.note).startswith("The pin never reads low")
+    assert text(b.f_reliable) == BLOCKED and text(b.f_may_work) == BLOCKED
+
+
+# ── Signal Bandwidth tab: two numbers ─────────────────────────────────────────
+
+def test_two_numbers_answer_the_question(w):
+    load_design(w, schottky_rail())
+    b = w.bandwidth_tab
+    labels = set(all_label_texts(w))
+    assert "Input frequency this pin can handle" in labels
+    assert "May work up to" in labels and "Reliable up to" in labels
+    assert any("per channel for an encoder" in t and "50 % duty" in t for t in labels)
+    assert text(b.f_may_work) == "1.347 MHz" and text(b.f_reliable) == "898.0 kHz"
+    d = w.app_state.details
+    assert d["f_reliable_hz"] == pytest.approx(d["f_may_work_hz"] / 1.5)
+    # the two headline numbers are the large ones
+    assert b.f_may_work.cget("font")[1] == b.f_reliable.cget("font")[1] == 20
+    assert b.required_value.cget("font")[1] == 13
+
+
+def test_margin_factor_is_a_visible_field(w):
+    assert widget(w, "bw.margin_factor").get() == "1.5"      # starting value, new design
+    load_design(w, schottky_rail())
+    type_into(w, "bw.margin_factor", "2")
+    assert text(w.bandwidth_tab.f_may_work) == "1.347 MHz"
+    assert text(w.bandwidth_tab.f_reliable) == "673.5 kHz"
+    type_into(w, "bw.margin_factor", "")
+    assert text(w.bandwidth_tab.f_reliable) == NEEDS_INPUT
+    assert "Margin factor" in text(w.banner)
+    w.bw_input_panel.fill_button.invoke()
+    w.update()
+    assert widget(w, "bw.margin_factor").get() == "1.5"
+    tips = [t for t in _Tooltip.all_texts if "Starting value 1.5" in t]
+    assert tips and "1 MHz" in tips[0] and "1.5 MHz may work" in tips[0]
+
+
+def test_required_frequency_status(w):
+    load_design(w, schottky_rail())
+    b = w.bandwidth_tab
+    assert text(b.required_value) == NOT_GIVEN and text(b.required_status) == ""
+    for hz, shown, status in (("800000", "800.0 kHz", "✓ PASS"),
+                              ("1000000", "1.000 MHz", "⚠ TIGHT"),
+                              ("1400000", "1.400 MHz", "✗ FAIL")):
+        type_into(w, "system.f_required_hz", hz)
+        assert text(b.required_value) == shown and text(b.required_status) == status
+    assert text(w.verdict) == "Overall verdict: ✗ FAIL  (Safe Max, ADC range, Required frequency)"
+    type_into(w, "mcu.t_pulse_min_ns", "")
+    assert text(b.required_status) == NEEDS_INPUT and text(b.f_may_work) == NEEDS_INPUT
+
+
+def test_details_control(w):
+    """Details shows tau, total capacitance, the two edge times and the
+    shortest usable pulse; it is closed until asked for."""
+    load_design(w, schottky_rail())
+    b = w.bandwidth_tab
+    if b.details_shown:
+        b.toggle_details()
+    assert not b.details_shown and b.details_button.cget("text") == "Details ▸"
+    b.details_button.invoke()
+    w.update()
+    assert b.details_shown and b.details_button.cget("text") == "Details ▾"
+    rows = [t for t in all_label_texts(b.details_frame)]
+    for label in ("Time constant (τ)", "Total capacitance", "Rising edge to VIH",
+                  "Falling edge to VIL", "Shortest usable pulse"):
+        assert label in rows
+    assert [text(x) for x in (b.tau, b.c_total, b.t_rise, b.t_fall, b.t_shortest)] == [
+        "116.87", "18.0", "353.56", "255.19", "371.21"]
+    assert len([t for t in rows if t in ("ns", "pF")]) == 5      # five rows, no more
+    b.details_button.invoke()
+    w.update()
+    assert not b.details_shown
+
+
+def test_old_bandwidth_fields_and_limits_are_gone(w):
+    labels = set(all_label_texts(w))
+    for old in ("N_samples:", "f_periph:", "Bits:", "Signed:", "f_read:", "C_diode:",
+                "-3 dB bandwidth", "10–90% rise time", "Analog (conservative)",
+                "Analog (practical)", "Digital sampling", "Counter overflow",
+                "Effective Limit", "Undefined zone (rise)", "Bottleneck"):
+        assert old not in labels, old
+    assert sorted(w.bw_input_panel.widgets) == ["bw.c_stray_pf", "bw.margin_factor"]
+    for old in ("f_3db", "t_undef_rise", "f_analog", "f_practical", "f_digital",
+                "f_overflow", "f_effective"):
+        assert not hasattr(w.bandwidth_tab, old)
+    assert not hasattr(w.bw_input_panel, "derived")
+    # C_diode, C_pin and the minimum pulse width are part data now
+    assert widget(w, "diode.capacitance_pf") is w.diode_panel.widgets["diode.capacitance_pf"]
+    assert widget(w, "mcu.c_pin_pf") is w.mcu_panel.widgets["mcu.c_pin_pf"]
+    assert widget(w, "mcu.t_pulse_min_ns") is w.mcu_panel.widgets["mcu.t_pulse_min_ns"]
+    assert widget(w, "system.f_required_hz") is w.system_panel.widgets["system.f_required_hz"]
 
 
 # ── Plot clearing ─────────────────────────────────────────────────────────────

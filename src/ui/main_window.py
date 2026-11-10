@@ -283,13 +283,13 @@ class MainWindow(ctk.CTk):
         bw_container = ctk.CTkFrame(tab_bw, fg_color="transparent")
         bw_container.pack(fill="both", expand=True)
 
-        bw_left = ctk.CTkScrollableFrame(bw_container, width=380)
+        bw_left = ctk.CTkScrollableFrame(bw_container, width=360, height=250)
         bw_left.pack(side="left", fill="y", padx=(0, 5))
         self.bw_input_panel = BandwidthInputPanel(bw_left, self.app_state)
         self.bw_input_panel.pack(fill="x")
         self.field_panels.append(self.bw_input_panel)
 
-        bw_right = ctk.CTkScrollableFrame(bw_container)
+        bw_right = ctk.CTkScrollableFrame(bw_container, height=250)
         bw_right.pack(side="right", fill="both", expand=True)
         self.bandwidth_tab = BandwidthTab(bw_right)
 
@@ -326,7 +326,6 @@ class MainWindow(ctk.CTk):
         self.safety_tab.refresh(s)
         self.operating_tab.refresh(s)
         self.bandwidth_tab.refresh(s)
-        self.bw_input_panel.refresh_derived()
 
         # Overall verdict, naming the checks that fail or are tight
         verdict = s.results["verdict"]

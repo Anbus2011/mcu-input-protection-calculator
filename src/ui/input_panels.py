@@ -30,6 +30,10 @@ NOT_MODELLED = {
     "forward": "no forward data: forward conduction not included",
     "reverse": "no reverse data: leakage not included",
 }
+OTHER_PANELS_NOTE = (
+    "The other inputs of this tab are on the left: the diode capacitance in "
+    "the Clamp Diode panel, C_pin and the minimum pulse width in the MCU "
+    "panel, the logic levels and the required frequency in the System panel.")
 TABLE_TITLES = {
     "forward": "Forward (anode positive)",
     "reverse": "Reverse (cathode positive)",
@@ -487,8 +491,9 @@ class NotesPanel(ctk.CTkFrame):
 
 class BandwidthInputPanel(_FieldPanel):
     """Input fields of the Signal Bandwidth tab: the two board values. The
-    diode capacitance, the pin capacitance, the minimum pulse width and the
-    thresholds come from the other panels and are shown read-only here."""
+    diode capacitance comes from the Clamp Diode panel, the pin capacitance
+    and the minimum pulse width from the MCU panel, and the required
+    frequency from the System panel."""
 
     def __init__(self, parent, state: AppState):
         super().__init__(parent, state, fg_color="transparent")
@@ -496,26 +501,7 @@ class BandwidthInputPanel(_FieldPanel):
     def _build(self):
         LBL_W, ENT_W, UNIT_W = 110, 80, 35
 
-        ctk.CTkLabel(self, text="From Other Panels", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(5, 2))
-        auto = ctk.CTkFrame(self, fg_color="transparent")
-        auto.pack(fill="x", padx=5)
-        self.derived = {}
-        for name, label, unit, tip in (
-                ("c_diode_pf", "C_diode:", "pF", "Clamp Diode panel: Capacitance."),
-                ("c_pin_pf", "C_pin:", "pF", "MCU panel: C_pin."),
-                ("t_pulse_min_ns", "Min pulse width:", "ns", "MCU panel: Min pulse width."),
-                ("vil_v", "VIL:", "V", "VIL factor × VDD (MCU panel)."),
-                ("vih_v", "VIH:", "V", "VIH factor × VDD (MCU panel).")):
-            r = ctk.CTkFrame(auto, fg_color="transparent")
-            r.pack(fill="x", pady=1)
-            ctk.CTkLabel(r, text=label, width=LBL_W, text_color=MUTED, anchor="w").pack(side="left")
-            lbl = ctk.CTkLabel(r, text=NEEDS_INPUT, width=ENT_W, anchor="w", text_color=MUTED)
-            lbl.pack(side="left", padx=2)
-            ctk.CTkLabel(r, text=unit, width=UNIT_W, text_color=MUTED).pack(side="left")
-            _help_btn(r, tip)
-            self.derived[name] = lbl
-
-        ctk.CTkLabel(self, text="Board", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(10, 2))
+        ctk.CTkLabel(self, text="Board", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(5, 2))
         board = ctk.CTkFrame(self, fg_color="transparent")
         board.pack(fill="x", padx=5)
         self._labelled(board, "C_stray:", "bw.c_stray_pf", "pF",
@@ -534,21 +520,5 @@ class BandwidthInputPanel(_FieldPanel):
         self.fill_button.pack(anchor="w", padx=5, pady=(12, 2))
         ctk.CTkLabel(self, text="Fills only blank or unreadable fields above.",
                      text_color=MUTED, font=("", 11)).pack(anchor="w", padx=5)
-
-    def refresh_derived(self):
-        """Show the values the frequency limits take from the other panels."""
-        s = self.app_state
-        values = {
-            "c_diode_pf": s.circuit.v["clamp_diode.capacitance_pf"],
-            "c_pin_pf": s.circuit.v["mcu.c_pin_pf"],
-            "t_pulse_min_ns": s.circuit.v["mcu.t_pulse_min_ns"],
-            "vil_v": s.results["voltages"]["vil"],
-            "vih_v": s.results["voltages"]["vih"],
-        }
-        for name, lbl in self.derived.items():
-            v = values[name]
-            if v is None:
-                lbl.configure(text=NEEDS_INPUT, text_color=MUTED)
-            else:
-                text = f"{v:.3f}" if name in ("vil_v", "vih_v") else f"{v:g}"
-                lbl.configure(text=text, text_color=("gray10", "gray90"))
+        ctk.CTkLabel(self, text=OTHER_PANELS_NOTE, text_color=MUTED, font=("", 11),
+                     justify="left", wraplength=340).pack(anchor="w", padx=5, pady=(12, 2))
