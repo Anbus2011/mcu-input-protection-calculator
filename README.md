@@ -385,7 +385,7 @@ The application follows a **Model-View-Controller** pattern:
 
 - **Model** (`src/models/clamp_solver.py`) is the one solver. `solve(design)` takes the design as a dict in the layout of a `.div` file and returns the results as a dict. Any value may be `None` (blank); each result is calculated only when its inputs are present, and the missing inputs are reported per result. The app, `divcheck.py` and the tests all call this function.
 - **View** (`src/ui/`) contains all CustomTkinter widgets. Every input is bound to a Tk variable whose trace forwards the raw text to the controller. Output panels display the solver's results; they don't parse or calculate.
-- **Controller** (`src/core/app_state.py`) owns the text of every field and table cell, parses it, builds the design dict, calls the solver, sweeps the solver's pin-voltage function for the plot, and dispatches results back to the view via callbacks.
+- **Controller** (`src/core/app_state.py`) owns the text of every field and table cell, parses it, builds the design dict, calls the solver, sweeps the solver over the input range for the plot (the typical curve from its pin-voltage function, the lowest and the highest from its eight corners, solved once per point), and dispatches results back to the view via callbacks.
 
 ---
 
@@ -424,7 +424,7 @@ Everything else about a part (diode tables, capacitance, MCU limits, pin capacit
 python -m pytest tests/ -v
 ```
 
-All 814 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
+All 817 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
 
 ```bash
 python -m pytest tests/ -m "not ui"

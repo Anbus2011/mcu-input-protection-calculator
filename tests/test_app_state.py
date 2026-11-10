@@ -1091,6 +1091,67 @@ class TestPlot:
         assert s.plot_data["v_mcu_worst"][-1] == row["high"]
         assert s.plot_data["v_mcu_typ"][-1] == row["typ"]
 
+    @pytest.mark.parametrize("path", [ZENER_DIV, SCHOTTKY_DIV],
+                             ids=["zener_gnd", "schottky_rail"])
+    def test_low_and_high_curves_equal_the_pin_voltage_function(self, path):
+        """The sweep takes the lowest and the highest from one corners() call
+        per point. They are exactly (==, not approx) the solver's
+        pin_voltage(x, "low") and pin_voltage(x, "high"): at 0 V, at the
+        knee of each curve, at Max Input and at every other plot point."""
+        s = AppState()
+        s.open_file(path)
+        p = s.plot_data
+        v_in, last = p["v_in"], len(p["v_in"]) - 1
+        c = prepare(s.design)          # not the Circuit that AppState swept
+
+        def knee(curve):
+            """Index of the plot point where *curve* bends most."""
+            bend = [abs(curve[i - 1] - 2 * curve[i] + curve[i + 1])
+                    for i in range(1, last)]
+            return bend.index(max(bend)) + 1
+
+        knees = sorted({knee(p[k]) for k in ("v_mcu_typ", "v_mcu_low", "v_mcu_worst")})
+        assert v_in[0] == 0.0
+        assert v_in[last] == 30.0 == s.level("max_input")["v_in"]
+        for k in knees:                # a real knee: steeper before it than after it
+            assert 0 < k < last
+            for curve in (p["v_mcu_low"], p["v_mcu_worst"]):
+                before = (curve[k] - curve[0]) / (v_in[k] - v_in[0])
+                after = (curve[last] - curve[k]) / (v_in[last] - v_in[k])
+                assert before > 2 * after
+
+        named = [0, *knees, last]
+        for i in named + [i for i in range(last + 1) if i not in named]:
+            assert p["v_mcu_low"][i] == c.pin_voltage(v_in[i], "low"), v_in[i]
+            assert p["v_mcu_worst"][i] == c.pin_voltage(v_in[i], "high"), v_in[i]
+            assert p["v_mcu_low"][i] == pin_voltage(s.design, v_in[i], "low"), v_in[i]
+            assert p["v_mcu_worst"][i] == pin_voltage(s.design, v_in[i], "high"), v_in[i]
+
+    def test_sweep_solves_the_corners_once_per_point(self, monkeypatch):
+        """Plot cost: one corners() call per plot point serves both the
+        lowest and the highest curve (8 solves per point, not 16). Only the
+        typical curve goes through pin_voltage."""
+        from src.models.clamp_solver import Circuit
+        s = app_state(schottky_rail())
+        real_corners, real_pin_voltage = Circuit.corners, Circuit.pin_voltage
+        swept, cases = [], []
+
+        def corners(self, vin, where=""):
+            if where == "sweep":
+                swept.append(vin)
+            return real_corners(self, vin, where)
+
+        def pin_voltage_spy(self, v_in, case="typ"):
+            cases.append(case)
+            return real_pin_voltage(self, v_in, case)
+
+        monkeypatch.setattr(Circuit, "corners", corners)
+        monkeypatch.setattr(Circuit, "pin_voltage", pin_voltage_spy)
+        s.recalculate()
+        assert len(s.plot_data["v_in"]) == constants.PLOT_POINTS == 200
+        assert swept == s.plot_data["v_in"]            # once per point, in order
+        assert cases == ["typ"] * constants.PLOT_POINTS
+
     def test_lowest_curve_needs_the_worst_case_inputs(self):
         s = ref_state()
         s.set_field("r1.tol", "")

@@ -11,8 +11,9 @@ On every change AppState:
      are noted),
   2. builds the design dict (the layout of a .div file, format 2.0),
   3. calls the solver (src/models/clamp_solver.py) with it,
-  4. sweeps the solver's pin-voltage function over the input range for the
-     plot (plain lists),
+  4. sweeps the solver over the input range for the plot (plain lists: the
+     typical curve from its pin-voltage function, the lowest and the
+     highest from its corners, one call per point),
   5. builds an input report: which blank fields are needed, which fields
      have problems, and any solver warnings.
 
@@ -609,13 +610,19 @@ class AppState:
                 return row
         return None
 
-    # ── Plot: sweep of the solver's pin-voltage function ──────────────────
+    # ── Plot: sweep of the solver over the input range ────────────────────
 
     def _sweep(self):
         """V_mcu against V_input as plain lists: the typical curve, and the
         lowest and the highest of the 8 corners (V_mcuL and V_mcuH of the
         tables). The plot and the tables come from the same function, so
-        they cannot disagree. VIL and VIH are the solver's, passed on."""
+        they cannot disagree. VIL and VIH are the solver's, passed on.
+
+        The typical curve is the solver's pin_voltage(x, "typ"). The lowest
+        and the highest come from one call to the solver's corners() per
+        point (min and max of its eight voltages): the same values as
+        pin_voltage(x, "low") and pin_voltage(x, "high"), which would each
+        solve the eight corners again."""
         c = self.circuit
         vin_max, vin_min = c.v[solver.VIN_MAX], c.v["system.v_input_min"]
         typ_block = c.blocked("typ") + [p for p in c.cause[solver.VIN_MAX]
@@ -637,8 +644,12 @@ class AppState:
             if not typ_block:
                 data["v_mcu_typ"] = [c.pin_voltage(x, "typ") for x in v_in]
             if not worst_block:
-                data["v_mcu_low"] = [c.pin_voltage(x, "low") for x in v_in]
-                data["v_mcu_worst"] = [c.pin_voltage(x, "high") for x in v_in]
+                low, high = [], []
+                for x in v_in:
+                    volts = [corner["v"] for corner in c.corners(x, "sweep")]
+                    low.append(min(volts))
+                    high.append(max(volts))
+                data["v_mcu_low"], data["v_mcu_worst"] = low, high
             self.plot_data = data
 
         if typ_block and worst_block:
