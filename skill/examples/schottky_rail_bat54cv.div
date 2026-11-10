@@ -1,0 +1,93 @@
+{
+  "version": "2.0",
+  "created": "2026-11-09",
+  "notes": "Same divider as the baseline with a Schottky from the pin to VDD.",
+  "resistors": {
+    "r1": {"value": 10, "unit": "k\u03a9", "rating_mw": 200, "tolerance_pct": 1},
+    "r2": {"value": 18, "unit": "k\u03a9", "rating_mw": 100, "tolerance_pct": 1},
+    "r_series": {"value": 0, "unit": "\u03a9", "rating_mw": null, "tolerance_pct": null}
+  },
+  "clamp_diode": {
+    "part": "BAT54CV",
+    "source": "Nexperia BAT54CV, 27 December 2022: Tables 5 and 7, Figs. 1 and 2",
+    "checked": false,
+    "note": "forward: v_max is Table 7 (maximum VF, 25 C). v_typ is Fig. 1 curve (3), typical at 25 C, read from the graph. v_min = v_typ - (v_max - v_typ): the data sheet gives no minimum. reverse: v_typ is the voltage at which Fig. 2 curve (3) (typical, 25 C) reaches each current. v_min is the same curve with its current x 1.58, so that it passes through the Table 7 maximum (2 uA at 25 V); v_max is the curve with its current / 1.58 (no data-sheet value). The two rows cover VR up to about 5 V on the leakiest column, enough for a 3.3 V rail; above that the extended segment over-estimates leakage. 25 C only: at 85 C typical leakage is about 30 uA (Fig. 2 curve (2)). capacitance: Cd max at VR = 1 V, 1 MHz (Table 7). ptot: per device, one diode loaded, standard footprint (Table 5).",
+    "type": "schottky",
+    "anode": "node",
+    "cathode": "vdd",
+    "capacitance_pf": 10,
+    "ptot_mw": 350,
+    "forward": [
+      {"i_ma": 0.1, "v_min": 0.06, "v_typ": 0.15, "v_max": 0.24},
+      {"i_ma": 1, "v_min": 0.106, "v_typ": 0.213, "v_max": 0.32},
+      {"i_ma": 10, "v_min": 0.2, "v_typ": 0.3, "v_max": 0.4},
+      {"i_ma": 30, "v_min": 0.222, "v_typ": 0.361, "v_max": 0.5},
+      {"i_ma": 100, "v_min": 0.3, "v_typ": 0.55, "v_max": 0.8}
+    ],
+    "reverse": [
+      {"i_ma": 0.00065, "v_min": 1.19, "v_typ": 7.31, "v_max": 18.3},
+      {"i_ma": 0.00088, "v_min": 4.65, "v_typ": 14.1, "v_max": 28.6}
+    ]
+  },
+  "mcu": {
+    "part": "STM32G484 (TT_xx pin)",
+    "source": "ST DS12983 Rev 5: Tables 14, 15, 17, 54 and 84",
+    "checked": false,
+    "note": "TT_xx pin. Safe Max = VDD + 0.3 V (Table 17, VIN). Abs. Max 4.0 V and pin minimum VSS - 0.3 V (Table 14). VIL 0.3 x VDD, VIH 0.7 x VDD and CIO 5 pF typ (Table 54). Minimum pulse width: 3 x tTIMxCLK at 170 MHz (Table 84, tW(TI1,TI2), directional clock x1). ADC: 12 bit.",
+    "pin_type": "TT",
+    "vdd": 3.3,
+    "v_recommended_max": 3.6,
+    "v_absolute_max": 4.0,
+    "v_pin_min": -0.3,
+    "adc_bits": 12,
+    "vil_factor": 0.3,
+    "vih_factor": 0.7,
+    "c_pin_pf": 5,
+    "t_pulse_min_ns": 17.65
+  },
+  "system": {
+    "v_input_max": 30,
+    "v_input_min": null,
+    "v_analog_fullscale": 5.1,
+    "analog_error_allowed_pct": null,
+    "v_logic_high_min": 3.8,
+    "v_logic_low_max": 1.0,
+    "v_touch": null,
+    "f_required_hz": null
+  },
+  "bandwidth": {"c_stray_pf": 3, "margin_factor": 1.5},
+  "results": {
+    "solver_version": "2.0.0",
+    "verdict": "FAIL",
+    "checks": [
+      {"id": "pin_max_safe", "status": "FAIL", "value": 3.651284, "limit": 3.6, "unit": "V"},
+      {"id": "pin_max_abs", "status": "PASS", "value": 3.651284, "limit": 4.0, "unit": "V"},
+      {"id": "logic_high", "status": "PASS", "value": 2.427868, "limit": 2.31, "unit": "V"},
+      {"id": "logic_low", "status": "PASS", "value": 0.6521694, "limit": 0.99, "unit": "V"},
+      {"id": "power_r1", "status": "PASS", "value": 71.23858, "limit": 200.0, "unit": "mW"},
+      {"id": "power_r2", "status": "PASS", "value": 0.7481177, "limit": 100.0, "unit": "mW"},
+      {"id": "power_diode", "status": "PASS", "value": 0.8643853, "limit": 350.0, "unit": "mW"},
+      {"id": "analog_range", "status": "FAIL", "value": 3.301258, "limit": 3.3, "unit": "V"},
+      {"id": "analog_error", "status": null, "value": 0.1150175, "limit": null, "unit": "%"}
+    ],
+    "info": [
+      {"id": "f_may_work", "value": 1346946.0, "unit": "Hz"},
+      {"id": "f_reliable", "value": 897964.2, "unit": "Hz"},
+      {"id": "rail_current", "value": 2.493096, "unit": "mA"}
+    ],
+    "voltages": {
+      "vil": 0.99,
+      "vih": 2.31,
+      "levels": {
+        "zero": {"v_in": 0.0, "typ": 0.003493483, "low": 0.002660867, "high": 0.00507447},
+        "logic_low": {"v_in": 1.0, "typ": 0.6462519, "low": 0.6408972, "high": 0.6521694},
+        "logic_high": {"v_in": 3.8, "typ": 2.44599, "low": 2.427868, "high": 2.464295},
+        "analog_fullscale": {"v_in": 5.1, "typ": 3.28159, "low": 3.257535, "high": 3.301258},
+        "max_input": {"v_in": 30.0, "typ": 3.546831, "low": 3.442353, "high": 3.651284}
+      }
+    },
+    "needs_input": [],
+    "notes": [],
+    "warnings": []
+  }
+}

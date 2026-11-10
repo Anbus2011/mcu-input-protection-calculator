@@ -11,8 +11,8 @@ import pytest
 
 from src.core import div_format
 from src.core.div_format import (
-    FORMAT, VALUE, DivError, number_paths, read_json, results_for_file, validate,
-    with_results, write_json,
+    FORMAT, VALUE, DivError, number_paths, parse_json, read_json, results_for_file,
+    to_text, validate, with_results, write_json,
 )
 from src.models import clamp_solver
 from src.models.clamp_solver import solve
@@ -410,6 +410,44 @@ class TestReadWrite:
         assert KOHM in text
         path.write_bytes(b"\xef\xbb\xbf" + text.encode("utf-8"))
         assert read_json(str(path)) == zener_reference()
+
+    def test_parse_json_is_read_json_without_the_file(self, tmp_path):
+        """read_json parses a file's text with parse_json: the same data and
+        the same problem for the same text."""
+        for name in EXAMPLES:
+            with open(example_path(name), encoding="utf-8") as f:
+                assert parse_json(f.read()) == read_json(example_path(name))
+        assert parse_json(json.dumps(zener_reference())) == zener_reference()
+        assert parse_json("[1, 2]") == [1, 2]           # not validated here
+        bad = tmp_path / "bad.div"
+        bad.write_text("{not json", encoding="utf-8")
+        with pytest.raises(DivError) as from_file:
+            read_json(str(bad))
+        with pytest.raises(DivError) as from_text:
+            parse_json("{not json")
+        assert from_text.value.problems == from_file.value.problems
+        assert str(from_text.value).startswith("file: not valid JSON")
+        assert from_text.value.problems[0].kind == FORMAT
+
+    @pytest.mark.parametrize("make", [zener_reference, schottky_rail, blank_design])
+    def test_to_text_is_what_write_json_writes(self, make, tmp_path):
+        data = with_results(make(), solve(make()))
+        path = tmp_path / "a.div"
+        write_json(str(path), data)
+        with open(path, encoding="utf-8", newline="") as f:
+            written = f.read()
+        assert to_text(data) == written.replace("\r\n", "\n")   # line ends apart
+        assert to_text(data).endswith("}\n") and to_text(data).isascii()
+        assert json.loads(to_text(data)) == data
+
+    @pytest.mark.parametrize("name", list(EXAMPLES))
+    def test_to_text_of_an_example_is_the_example_file(self, name):
+        with open(example_path(name), encoding="utf-8") as f:
+            assert to_text(read_json(example_path(name))) == f.read()
+
+    def test_to_text_never_writes_nan(self):
+        with pytest.raises(ValueError):
+            to_text({"x": float("nan")})
 
     def test_megaohm_unit(self):
         d = change(zener_reference(), resistors__r2__unit="MΩ")

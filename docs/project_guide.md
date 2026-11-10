@@ -28,25 +28,30 @@ What this project is for, what the planned Claude skill will do, and the workflo
 
 The skill is not built yet. It will be a Claude skill that designs the protection network for one input and writes its `.div`.
 
-**In the skill (deterministic):**
-- the solver, reached through an MCP server that lives in `skill/` in this repository. The server imports `src/models/clamp_solver.py` and `src/core/div_format.py` directly, so the repository holds the only copy of the solver. Its tools take the contents of a `.div` (not a file path, so the server can run on another machine), validate and solve it, return the file with `results` filled in and draw the plot. Every call also returns `SOLVER_VERSION` and the commit the server is running. `skill/` also holds the skill's `SKILL.md`. That folder is the master copy: changes are made there, never in the copy installed in Claude;
-- a value search over E96 R1/R2 pairs, ranked by a fixed rule;
+**Deterministic, through the MCP server:**
+- the solver, reached through an MCP server that lives in `skill/` in this repository. The server imports `src/models/clamp_solver.py` and `src/core/div_format.py` directly, so the repository holds the only copy of the solver. Its tools take the contents of a `.div` (not a file path, so the server can run on another machine), validate and solve it, return the file with `results` filled in and draw the plot. Every call also returns `SOLVER_VERSION`, the commit the server is running and `dirty` (true when the server's folder had uncommitted changes when it started). The server does no math of its own, chooses no values and reads or writes no files.
+
+**Fixed rules, in `SKILL.md`** (`skill/SKILL.md` is the master copy: changes are made there, never in the copy installed in Claude):
+- the workflow below and the check list;
+- resistor values from the E96 series, 1 % tolerance by default;
 - the resistor specification: value, tolerance, power rating after derating to the check temperature, and working voltage;
-- the `.div` writer and the report template.
+- the report template.
 
 **In chat:**
 - confirming the requirements (asked once per board, then saved);
 - assigning a role to each input;
 - reading data sheets into the `mcu` and `clamp_diode` sections;
+- choosing R1 and R2, writing the `.div`, solving it through the server, and changing values until the checks pass;
 - trade-off choices that the requirements don't settle;
-- the part-number search, done only after the resistor specification is agreed.
+- the part-number search, through a distributor's parts search, done only after the resistor specification is agreed.
 
 **Rules:**
-- The script does all the math. Chat never retypes a number: tables and plots are shown as the script printed them.
+- The solver does all the math, through the server. Chat never retypes a number: tables are shown as `solve_div` returned them and plots as `plot_div` drew them.
 - Nothing is guessed. A value the skill can't source is written as `null` and shows as "needs input".
 - Every data-sheet value is cited in `source` and `note` (document number, revision, table or figure), and the section is written with `checked: false`.
-- Before designing, the skill runs `divcheck.py` on both files in `examples/` and stops if the results differ from the stored ones.
+- Before designing, the skill solves both example files through `solve_div` and stops if the results differ from their stored results. It uses its own copies in `skill/examples/`; a test fails if they differ from `examples/`.
 - The skill has its own version number and states the `SOLVER_VERSION` it was written and tested for. If the server reports a different `SOLVER_VERSION`, the skill stops and says the skill may need updating. Every `.div` carries `SOLVER_VERSION` in its `results`, and the skill writes its own version, the solver version and the server's commit in the file's `notes` and in its report (format 2.0 has no key for them).
+- When `solver_info` reports `dirty: true`, the skill continues. It writes "server dirty: true" with the commit in the file's `notes`, and flags it at the top of its report.
 - A check the solver doesn't make (for example resistor derating at temperature, or the board's minimum rail load) is reported as done by the skill or as not checked, never as PASS.
 - `rating_mw` in the `.div` is the data-sheet rating as stated. Derating to the check temperature is the skill's own check, in its report.
 
@@ -64,7 +69,7 @@ The skill is not built yet. It will be a Claude skill that designs the protectio
 2. **MCU.** The skill reads the MCU data sheet and fills in the `mcu` section, with `source`, `note` and `checked: false`.
 3. **Resistors.** The skill proposes the resistor criteria (values, tolerance, power rating, package) and agrees them with the user. It searches for part numbers only after that.
 4. **Diode.** The skill reads the diode data sheet and writes the `forward` and `reverse` tables. Temperature goes into the outer columns: `v_min` is the part that conducts most and `v_max` the part that conducts least, over the temperature range. For a Schottky those are the hot and the cold extremes, in both tables. The `note` says how each column was obtained, including any column the data sheet doesn't guarantee.
-5. **Solve.** The skill writes the `.div` and runs `divcheck.py`. It iterates over the value search until every check passes, or reports which check can't pass and the options.
+5. **Solve.** Claude writes the `.div` and solves it through the MCP server. It changes R1 and R2 (E96 values) and solves again until every check passes, or reports which check can't pass and the options.
 6. **Review.** The user opens the file in the app and compares the MCU and diode values with the data sheets. They tick "checked" and adjust any close values.
 7. **Bench check.** Before a design is approved, sweep the input to about 5, 12, 24 and 30 V on a built board and compare the measured pin voltage with the typical curve.
 
@@ -77,5 +82,5 @@ The skill is not built yet. It will be a Claude skill that designs the protectio
 
 ## 5. Next work
 
-1. Build the skill in `skill/`: the MCP server, its tests (both files in `examples/` solved through the server's tools give their stored results), and `SKILL.md`. Then test the installed skill live in a Claude chat.
+1. Finish the skill in `skill/`. The MCP server and its tests are done (`skill/server.py`, `tests/test_mcp_server.py`: both files in `examples/` solved through the server's tools give their stored results). Still to do: write `SKILL.md`, register the server in Claude Desktop, then test the installed skill live in a Claude chat.
 2. The first real design, made with the skill: the user inputs of a dual-channel motor controller. Its requirements are kept with that board's project, not in this repository.
