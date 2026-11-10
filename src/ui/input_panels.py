@@ -1,18 +1,21 @@
 """
-Input panel classes for the Divider Calculator.
+Input panel classes for the MCU Input Protection Calculator.
 
 Each panel owns its CTk widgets. Every input is bound to a Tk variable whose
-write trace forwards the raw text to AppState.set_field, so typing, paste,
-cut, delete, selection and programmatic changes are all seen. Panels never
-parse or calculate; AppState does. sync_from_state() copies AppState's text
-back into the widgets after AppState changed it (load, new, preset, fill).
+write trace forwards the raw text to AppState.set_field (or set_cell for the
+clamp-diode tables), so typing, paste, cut, delete, selection and
+programmatic changes are all seen. Panels never parse or calculate; AppState
+does. sync_from_state() copies AppState's text back into the widgets after
+AppState changed it (load, new, fill, table row added or deleted).
 """
 from __future__ import annotations
 
 import customtkinter as ctk
 from typing import TYPE_CHECKING
 
-from src.core.constants import CUSTOM_PRESET, RESISTOR_UNITS, ZENER_PRESETS
+from src.core.constants import RESISTOR_UNITS
+from src.core.div_format import DIODE_TYPES
+from src.models.clamp_solver import ROW_KEYS, TERMINALS
 
 if TYPE_CHECKING:
     from src.core.app_state import AppState
@@ -21,10 +24,26 @@ if TYPE_CHECKING:
 UNIT_CHOICES = list(RESISTOR_UNITS.keys())
 NEEDS_INPUT = "needs input"
 MUTED = "gray60"
-ZZK_NOTE = "ZZK: reference only, not used in the calculation"
-ZZK_TOOLTIP = ("ZZK (dynamic impedance at IZK) is reference only and is not "
-               "used in the calculation. The Zener V-I model uses VZ, IZT, IZK "
-               "and ZZT; you can leave ZZK blank.")
+
+# Shown under a clamp-diode table that has no rows.
+NOT_MODELLED = {
+    "forward": "no forward data: forward conduction not included",
+    "reverse": "no reverse data: leakage not included",
+}
+TABLE_TITLES = {
+    "forward": "Forward (anode positive)",
+    "reverse": "Reverse (cathode positive)",
+}
+TABLE_TIPS = {
+    "forward": "The diode with its anode more positive than its cathode.\n"
+               "Each row: a current and the voltage across the diode at that\n"
+               "current (minimum, typical, maximum). Rows in ascending current.\n"
+               "No rows = this direction is not modelled.",
+    "reverse": "The diode with its cathode more positive than its anode: the\n"
+               "working direction of a Zener, the leakage direction of a\n"
+               "Schottky. Voltages and currents are entered as positive numbers.\n"
+               "No rows = this direction is not modelled.",
+}
 
 
 # ── Tooltip Helper ────────────────────────────────────────────────────────────
@@ -33,9 +52,12 @@ class _Tooltip:
     """Popup tooltip that appears near a widget on hover or click.
     Auto-dismisses after 4 seconds or when the mouse leaves."""
 
+    all_texts: list = []     # every tooltip text created (read by the UI tests)
+
     def __init__(self, widget: ctk.CTkBaseClass, text: str):
         self.widget = widget
         self.text = text
+        _Tooltip.all_texts.append(text)
         self._tw = None
         self._hide_id = None
         widget.bind("<Enter>", self._show)
@@ -101,6 +123,7 @@ class _FieldPanel(ctk.CTkFrame):
         self.app_state = state
         self.vars: dict = {}      # field key -> Tk variable
         self.widgets: dict = {}   # field key -> widget
+        self.textboxes: dict = {}  # field key -> CTkTextbox (no Tk variable)
         self._build()
         self.sync_from_state()
 
@@ -118,19 +141,65 @@ class _FieldPanel(ctk.CTkFrame):
         self._add_field(key, var, e)
         return e
 
-    def _unit_combo(self, parent, key, width=70):
+    def _combo(self, parent, key, values, width=70):
         var = ctk.StringVar(master=self, value="")
-        c = ctk.CTkComboBox(parent, values=UNIT_CHOICES, width=width,
+        c = ctk.CTkComboBox(parent, values=list(values), width=width,
                             variable=var, state="readonly")
         self._add_field(key, var, c)
         return c
 
-    def _checkbox(self, parent, key, width):
+    def _unit_combo(self, parent, key, width=70):
+        return self._combo(parent, key, UNIT_CHOICES, width)
+
+    def _checkbox(self, parent, key, text="", width=24):
         var = ctk.StringVar(master=self, value="0")
-        c = ctk.CTkCheckBox(parent, text="", width=width, variable=var,
+        c = ctk.CTkCheckBox(parent, text=text, width=width, variable=var,
                             onvalue="1", offvalue="0")
         self._add_field(key, var, c)
         return c
+
+    def _textbox(self, parent, key, height=60):
+        """Free text over several lines. Text widgets have no Tk variable, so
+        edits are caught with <<Modified>>, which Tk raises for typing, paste,
+        cut and delete alike."""
+        box = ctk.CTkTextbox(parent, height=height, wrap="word")
+
+        def on_modified(event=None):
+            if not box.edit_modified():
+                return
+            box.edit_modified(False)
+            self.app_state.set_field(key, box.get("1.0", "end-1c"))
+        box.bind("<<Modified>>", on_modified)
+        self.textboxes[key] = box
+        self.widgets[key] = box
+        return box
+
+    def _labelled(self, parent, label, key, unit="", tip=None, lbl_w=110, ent_w=80, unit_w=45):
+        r = ctk.CTkFrame(parent, fg_color="transparent")
+        r.pack(fill="x", pady=2)
+        ctk.CTkLabel(r, text=label, width=lbl_w, anchor="w").pack(side="left")
+        self._entry(r, key, ent_w).pack(side="left", padx=2)
+        ctk.CTkLabel(r, text=unit, width=unit_w, anchor="w").pack(side="left")
+        if tip:
+            _help_btn(r, tip)
+        return r
+
+    def _part_rows(self, parent, prefix, lbl_w):
+        """Source, note and the "checked" box that a diode or MCU carries."""
+        r = ctk.CTkFrame(parent, fg_color="transparent")
+        r.pack(fill="x", pady=2)
+        ctk.CTkLabel(r, text="Source:", width=lbl_w, anchor="w").pack(side="left")
+        self._entry(r, f"{prefix}.source", 290).pack(side="left", padx=2)
+        _help_btn(r, "One line: data sheet, revision, tables or figures used.")
+        r = ctk.CTkFrame(parent, fg_color="transparent")
+        r.pack(fill="x", pady=2)
+        ctk.CTkLabel(r, text="Note:", width=lbl_w, anchor="nw").pack(side="left", anchor="n")
+        self._textbox(r, f"{prefix}.note").pack(side="left", fill="x", expand=True, padx=2)
+        r = ctk.CTkFrame(parent, fg_color="transparent")
+        r.pack(fill="x", pady=2)
+        ctk.CTkLabel(r, text="", width=lbl_w).pack(side="left")
+        self._checkbox(r, f"{prefix}.checked",
+                       text="Checked against the data sheet").pack(side="left", padx=2)
 
     def sync_from_state(self):
         """Copy AppState's field text into the widgets (no-op where equal)."""
@@ -138,6 +207,11 @@ class _FieldPanel(ctk.CTkFrame):
             text = self.app_state.fields[key]
             if var.get() != text:
                 var.set(text)
+        for key, box in self.textboxes.items():
+            text = self.app_state.fields[key]
+            if box.get("1.0", "end-1c") != text:
+                box.delete("1.0", "end")
+                box.insert("1.0", text)
 
 
 # ── Resistor Panel ────────────────────────────────────────────────────────────
@@ -161,102 +235,168 @@ class ResistorPanel(_FieldPanel):
                      text_color=MUTED, font=("", 11)).pack(anchor="w", padx=10)
 
 
-# ── Zener Panel ───────────────────────────────────────────────────────────────
+# ── Clamp Diode Panel ─────────────────────────────────────────────────────────
 
-class ZenerPanel(_FieldPanel):
+class _DiodeTable(ctk.CTkFrame):
+    """One editable clamp-diode table: a row is a current and the voltage
+    across the diode at that current (minimum, typical, maximum)."""
+
+    HEADERS = ("I (mA)", "V min", "V typ", "V max")
+    CELL_W = 84
+
+    def __init__(self, parent, state: AppState, table: str):
+        super().__init__(parent, fg_color="transparent")
+        self.app_state = state
+        self.table = table
+        self.cells: list = []     # per row: {row key: CTkEntry}
+        self._vars: list = []     # per row: {row key: StringVar}
+        self.delete_buttons: list = []
+
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.pack(fill="x")
+        ctk.CTkLabel(head, text=TABLE_TITLES[table], font=("", 12, "bold")).pack(side="left")
+        _help_btn(head, TABLE_TIPS[table])
+        self.add_button = ctk.CTkButton(head, text="+ Add row", width=80, height=24,
+                                        command=lambda: state.add_row(table))
+        self.add_button.pack(side="right")
+
+        self.grid_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.grid_frame.pack(fill="x", pady=(2, 0))
+        for col, text in enumerate(self.HEADERS):
+            ctk.CTkLabel(self.grid_frame, text=text, width=self.CELL_W, anchor="w",
+                         text_color=MUTED, font=("", 11)).grid(row=0, column=col, padx=1)
+        self.note = ctk.CTkLabel(self, text="", text_color="orange", font=("", 11),
+                                 anchor="w")
+        self.note.pack(fill="x")
+        self.sync_from_state()
+
+    def _rebuild(self):
+        for row in self.cells:
+            for entry in row.values():
+                entry.destroy()
+        for button in self.delete_buttons:
+            button.destroy()
+        self.cells, self._vars, self.delete_buttons = [], [], []
+        for i, texts in enumerate(self.app_state.tables[self.table]):
+            entries, variables = {}, {}
+            for col, key in enumerate(ROW_KEYS):
+                var = ctk.StringVar(master=self, value=texts[key])
+                var.trace_add("write", lambda *_, i=i, key=key, var=var:
+                              self.app_state.set_cell(self.table, i, key, var.get()))
+                entry = ctk.CTkEntry(self.grid_frame, width=self.CELL_W, textvariable=var)
+                entry.grid(row=i + 1, column=col, padx=1, pady=1)
+                entries[key], variables[key] = entry, var
+            button = ctk.CTkButton(self.grid_frame, text="×", width=24, height=24,
+                                   fg_color="gray40", hover_color="gray30",
+                                   command=lambda i=i: self.app_state.delete_row(self.table, i))
+            button.grid(row=i + 1, column=len(ROW_KEYS), padx=(4, 0))
+            self.cells.append(entries)
+            self._vars.append(variables)
+            self.delete_buttons.append(button)
+
+    def sync_from_state(self):
+        rows = self.app_state.tables[self.table]
+        if len(rows) != len(self.cells):
+            self._rebuild()
+        else:
+            for variables, texts in zip(self._vars, rows):
+                for key, var in variables.items():
+                    if var.get() != texts[key]:
+                        var.set(texts[key])
+        self.note.configure(text="" if rows else NOT_MODELLED[self.table])
+
+
+class ClampDiodePanel(_FieldPanel):
+    """One clamp diode of either kind: part name, type, connection, the
+    forward and reverse tables, capacitance, power rating, source, note and
+    the "checked" box. No presets: values are typed or come from the file."""
+
     def _build(self):
-        LBL, ENT, UNT, LBL2 = 70, 60, 50, 40
-
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(header, text="Zener Diode", font=("", 14, "bold")).pack(side="left")
-        self.preset = ctk.CTkComboBox(
-            header, values=list(ZENER_PRESETS.keys()) + [CUSTOM_PRESET], width=150,
-            state="readonly", command=self.app_state.select_zener_preset)
-        self.preset.pack(side="right")
-        ctk.CTkLabel(header, text="Preset:").pack(side="right", padx=5)
-        self.modified_label = ctk.CTkLabel(self, text="", text_color="orange",
-                                           font=("", 11))
-        self.modified_label.pack(anchor="e", padx=10)
-
+        LBL = 90
+        ctk.CTkLabel(self, text="Clamp Diode", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
         params = ctk.CTkFrame(self, fg_color="transparent")
         params.pack(fill="x", padx=10, pady=5)
 
-        def row():
-            r = ctk.CTkFrame(params, fg_color="transparent")
-            r.pack(fill="x", pady=2)
-            return r
+        r = ctk.CTkFrame(params, fg_color="transparent")
+        r.pack(fill="x", pady=2)
+        ctk.CTkLabel(r, text="Part:", width=LBL, anchor="w").pack(side="left")
+        self._entry(r, "diode.part", 150).pack(side="left", padx=2)
+        ctk.CTkLabel(r, text="Type:").pack(side="left", padx=(10, 2))
+        self._combo(r, "diode.type", DIODE_TYPES, 100).pack(side="left", padx=2)
+        _help_btn(r, "Zener or Schottky. A label only: the calculation uses the\n"
+                     "connection and the two tables, whatever the type.")
 
-        r1 = row()
-        ctk.CTkLabel(r1, text="VZ nom:", width=LBL).pack(side="left")
-        self._entry(r1, "zener.vz_nom", ENT).pack(side="left", padx=2)
-        ctk.CTkLabel(r1, text="V", width=LBL2).pack(side="left")
-        ctk.CTkLabel(r1, text="min:", width=LBL2).pack(side="left")
-        self._entry(r1, "zener.vz_min", ENT).pack(side="left", padx=2)
-        ctk.CTkLabel(r1, text="V", width=LBL2).pack(side="left")
-        ctk.CTkLabel(r1, text="max:", width=LBL2).pack(side="left")
-        self._entry(r1, "zener.vz_max", ENT).pack(side="left", padx=2)
-        ctk.CTkLabel(r1, text="V", width=LBL2).pack(side="left")
+        r = ctk.CTkFrame(params, fg_color="transparent")
+        r.pack(fill="x", pady=2)
+        ctk.CTkLabel(r, text="Connection:", width=LBL, anchor="w").pack(side="left")
+        ctk.CTkLabel(r, text="anode").pack(side="left", padx=(2, 2))
+        self._combo(r, "diode.anode", TERMINALS, 80).pack(side="left", padx=2)
+        ctk.CTkLabel(r, text="cathode").pack(side="left", padx=(10, 2))
+        self._combo(r, "diode.cathode", TERMINALS, 80).pack(side="left", padx=2)
+        _help_btn(r, "Where each terminal of the diode is connected. \"node\" is the\n"
+                     "junction of R1 and R2; exactly one terminal is at the node.\n"
+                     "Zener to GND: anode gnd, cathode node.\n"
+                     "Schottky to the rail: anode node, cathode vdd.\n"
+                     "Schottky to GND: anode gnd, cathode node.")
 
-        r2 = row()
-        ctk.CTkLabel(r2, text="@IZT:", width=LBL).pack(side="left")
-        self._entry(r2, "zener.izt_ma", ENT).pack(side="left", padx=2)
-        ctk.CTkLabel(r2, text="mA", width=LBL2).pack(side="left")
-        ctk.CTkLabel(r2, text="ZZT:", width=LBL2).pack(side="left")
-        self._entry(r2, "zener.zzt_typ", ENT).pack(side="left", padx=2)
-        ctk.CTkLabel(r2, text="Ω typ", width=UNT).pack(side="left")
-        self._entry(r2, "zener.zzt_max", ENT).pack(side="left", padx=2)
-        ctk.CTkLabel(r2, text="Ω max", width=UNT).pack(side="left")
+        r = ctk.CTkFrame(params, fg_color="transparent")
+        r.pack(fill="x", pady=2)
+        ctk.CTkLabel(r, text="Capacitance:", width=LBL, anchor="w").pack(side="left")
+        self._entry(r, "diode.capacitance_pf", 60).pack(side="left", padx=2)
+        ctk.CTkLabel(r, text="pF").pack(side="left")
+        _help_btn(r, "Diode capacitance at 0 V bias, or the data-sheet maximum.\n"
+                     "Used for the Signal Bandwidth time constant.")
+        ctk.CTkLabel(r, text="Ptot:").pack(side="left", padx=(14, 2))
+        self._entry(r, "diode.ptot_mw", 60).pack(side="left", padx=2)
+        ctk.CTkLabel(r, text="mW").pack(side="left")
 
-        r3 = row()
-        ctk.CTkLabel(r3, text="@IZK:", width=LBL).pack(side="left")
-        self._entry(r3, "zener.izk_ma", ENT).pack(side="left", padx=2)
-        ctk.CTkLabel(r3, text="mA", width=LBL2).pack(side="left")
-        ctk.CTkLabel(r3, text="ZZK:", width=LBL2).pack(side="left")
-        self._entry(r3, "zener.zzk_typ", ENT).pack(side="left", padx=2)
-        ctk.CTkLabel(r3, text="Ω typ", width=UNT).pack(side="left")
-        self._entry(r3, "zener.zzk_max", ENT).pack(side="left", padx=2)
-        ctk.CTkLabel(r3, text="Ω max", width=UNT).pack(side="left")
+        self.tables = {}
+        for table in ("forward", "reverse"):
+            self.tables[table] = _DiodeTable(params, self.app_state, table)
+            self.tables[table].pack(fill="x", pady=(8, 0))
 
-        r3n = row()
-        ctk.CTkLabel(r3n, text="", width=LBL).pack(side="left")
-        self.zzk_note = ctk.CTkLabel(r3n, text=ZZK_NOTE, text_color=MUTED, font=("", 11))
-        self.zzk_note.pack(side="left")
-        btn = ctk.CTkLabel(r3n, text="?", width=18, height=18,
-                           fg_color=("gray75", "gray35"), corner_radius=9,
-                           font=("", 11, "bold"), text_color=("gray30", "gray80"),
-                           cursor="hand2")
-        btn.pack(side="left", padx=(4, 0))
-        self.zzk_tooltip = _Tooltip(btn, ZZK_TOOLTIP)
+        tail = ctk.CTkFrame(params, fg_color="transparent")
+        tail.pack(fill="x", pady=(8, 0))
+        self._part_rows(tail, "diode", LBL)
 
-        r4 = row()
-        ctk.CTkLabel(r4, text="Ptot:", width=LBL).pack(side="left")
-        self._entry(r4, "zener.ptot_mw", ENT).pack(side="left", padx=2)
-        ctk.CTkLabel(r4, text="mW", width=LBL2).pack(side="left")
-
-    def refresh_preset(self):
-        """Show the preset as AppState derives it (base, or Custom + 'modified')."""
-        text, note = self.app_state.zener_preset_display()
-        if self.preset.get() != text:
-            self.preset.set(text)
-        self.modified_label.configure(text=note)
+    def sync_from_state(self):
+        super().sync_from_state()
+        for table in getattr(self, "tables", {}).values():
+            table.sync_from_state()
 
 
 # ── MCU Panel ─────────────────────────────────────────────────────────────────
 
 class McuPanel(_FieldPanel):
     def _build(self):
-        LBL, ENT, UNT = 110, 80, 35
+        LBL = 110
 
         ctk.CTkLabel(self, text="MCU Pin Input Limits", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
         params = ctk.CTkFrame(self, fg_color="transparent")
         params.pack(fill="x", padx=10, pady=5)
 
+        r = ctk.CTkFrame(params, fg_color="transparent")
+        r.pack(fill="x", pady=2)
+        ctk.CTkLabel(r, text="Part:", width=LBL, anchor="w").pack(side="left")
+        self._entry(r, "mcu.part", 150).pack(side="left", padx=2)
+        ctk.CTkLabel(r, text="Pin type:").pack(side="left", padx=(10, 2))
+        self._entry(r, "mcu.pin_type", 60).pack(side="left", padx=2)
+        _help_btn(r, "A label for the kind of pin, such as TT or FT. The limits\n"
+                     "below are the ones the data sheet gives for that pin type.")
+
         rows = [
-            ("mcu.vdd", "VDD/VDDA:", "V", "Supply voltage. Also used as the ADC reference (VREF)."),
-            ("mcu.v_recommended_max", "Safe Max:", "V", None),
+            ("mcu.vdd", "VDD/VDDA:", "V",
+             "Supply voltage. Also used as the ADC reference (VREF), and as the\n"
+             "voltage of the rail when the clamp diode is connected to vdd."),
+            ("mcu.v_recommended_max", "Safe Max:", "V",
+             "Highest pin voltage in normal operation. The check against it is\n"
+             "the guard against current into the pin's protection diodes.\n"
+             "STM32G4 TT pins: VDD + 0.3 V (DS12983 Rev 5, Table 17)."),
             ("mcu.v_absolute_max", "Abs. Max:", "V", None),
-            ("mcu.safe_injection_ma", "Injection Limit:", "mA", None),
+            ("mcu.v_pin_min", "Pin Min:", "V",
+             "Lowest allowed pin voltage (0 or negative). Checked only when a\n"
+             "negative Min Input is given.\n"
+             "STM32G4: VSS - 0.3 V (DS12983 Rev 5, Table 14)."),
             ("mcu.adc_bits", "ADC bits:", "bits",
              "ADC resolution N; resolution = VREF / 2^N.\n"
              "STM32G4: 12-bit ADCs (STM32G484 datasheet DS12983 Rev 5, "
@@ -269,36 +409,50 @@ class McuPanel(_FieldPanel):
              "Pin input-high threshold as a fraction of VDD (VIH = factor × VDD).\n"
              "STM32G4: 0.7 (STM32G484 datasheet DS12983 Rev 5, Table 54, "
              "all I/Os except FT_c)."),
+            ("mcu.c_pin_pf", "C_pin:", "pF",
+             "MCU pin input capacitance. Used for the Signal Bandwidth time\n"
+             "constant. STM32G4: CIO 5 pF typ (DS12983 Rev 5, Table 54)."),
+            ("mcu.t_pulse_min_ns", "Min pulse width:", "ns",
+             "Shortest pulse the input peripheral accepts. Used for the Signal\n"
+             "Bandwidth limits. STM32G4 timer inputs: 2 to 3 timer clock\n"
+             "periods (DS12983 Rev 5, Table 84)."),
         ]
         for key, label, unit, tip in rows:
-            r = ctk.CTkFrame(params, fg_color="transparent")
-            r.pack(fill="x", pady=2)
-            ctk.CTkLabel(r, text=label, width=LBL).pack(side="left")
-            self._entry(r, key, ENT).pack(side="left", padx=2)
-            ctk.CTkLabel(r, text=unit, width=UNT).pack(side="left")
-            if tip:
-                _help_btn(r, tip)
+            self._labelled(params, label, key, unit, tip, lbl_w=LBL)
+        self._part_rows(params, "mcu", LBL)
 
 
 # ── System Panel ──────────────────────────────────────────────────────────────
 
 class SystemPanel(_FieldPanel):
     def _build(self):
-        LBL, ENT, UNT = 110, 80, 45
+        LBL = 130
 
         ctk.CTkLabel(self, text="System Requirements", font=("", 14, "bold")).pack(anchor="w", padx=10, pady=5)
         params = ctk.CTkFrame(self, fg_color="transparent")
         params.pack(fill="x", padx=10, pady=5)
-        for key, label, unit in (
-                ("system.v_input_max", "Max Input:", "V"),
-                ("system.v_analog_fullscale", "ADC Scale:", "V"),
-                ("system.v_logic_high_min", "Logic High:", "V min"),
-                ("system.v_logic_low_max", "Logic Low:", "V max")):
-            r = ctk.CTkFrame(params, fg_color="transparent")
-            r.pack(fill="x", pady=2)
-            ctk.CTkLabel(r, text=label, width=LBL).pack(side="left")
-            self._entry(r, key, ENT).pack(side="left", padx=2)
-            ctk.CTkLabel(r, text=unit, width=UNT).pack(side="left")
+        for key, label, unit, tip in (
+                ("system.v_input_max", "Max Input:", "V", None),
+                ("system.v_input_min", "Min Input:", "V",
+                 "Optional: the lowest input voltage. When it is negative, the\n"
+                 "lowest pin voltage is checked against Pin Min."),
+                ("system.v_analog_fullscale", "ADC Scale:", "V",
+                 "Optional: the input voltage at ADC full scale. Gives the\n"
+                 "analog range check and the analog error."),
+                ("system.analog_error_allowed_pct", "Allowed error:", "%",
+                 "Optional: allowed analog error at ADC Scale, in percent.\n"
+                 "Without it the analog error is shown for information only."),
+                ("system.v_logic_high_min", "Logic High:", "V min", None),
+                ("system.v_logic_low_max", "Logic Low:", "V max", None),
+                ("system.v_touch", "Touch voltage:", "V",
+                 "Optional: a voltage the input may touch, for example 60 V.\n"
+                 "Gives information rows only: it changes no verdict."),
+                ("system.f_required_hz", "Required freq.:", "Hz",
+                 "Optional: the input frequency the pin must handle (at the pin,\n"
+                 "50 % duty). Compared with the Signal Bandwidth limits.")):
+            self._labelled(params, label, key, unit, tip, lbl_w=LBL)
+        ctk.CTkLabel(self, text="Optional values left blank leave their check out.",
+                     text_color=MUTED, font=("", 11)).pack(anchor="w", padx=10)
 
 
 # ── Notes Panel ───────────────────────────────────────────────────────────────
@@ -329,33 +483,29 @@ class NotesPanel(ctk.CTkFrame):
             self.textbox.insert("1.0", text)
 
 
-# ── Bandwidth / PPS Input Panel ───────────────────────────────────────────────
+# ── Signal Bandwidth Input Panel ──────────────────────────────────────────────
 
 class BandwidthInputPanel(_FieldPanel):
-    """Input fields for the Signal Bandwidth / PPS analysis tab.
-
-    The tau resistance, VIL, VIH and V_high are derived by AppState from the
-    other panels and shown read-only here.
-    """
+    """Input fields of the Signal Bandwidth tab: the two board values. The
+    diode capacitance, the pin capacitance, the minimum pulse width and the
+    thresholds come from the other panels and are shown read-only here."""
 
     def __init__(self, parent, state: AppState):
         super().__init__(parent, state, fg_color="transparent")
 
     def _build(self):
-        LBL_W, ENT_W, UNIT_W = 90, 80, 35
+        LBL_W, ENT_W, UNIT_W = 110, 80, 35
 
-        ctk.CTkLabel(self, text="Derived from Other Panels", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(5, 2))
+        ctk.CTkLabel(self, text="From Other Panels", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(5, 2))
         auto = ctk.CTkFrame(self, fg_color="transparent")
         auto.pack(fill="x", padx=5)
         self.derived = {}
         for name, label, unit, tip in (
-                ("r_tau_ohms", "τ resistance:", "Ω",
-                 "R1∥R2 + R_s: the resistance that charges the pin capacitance."),
+                ("c_diode_pf", "C_diode:", "pF", "Clamp Diode panel: Capacitance."),
+                ("c_pin_pf", "C_pin:", "pF", "MCU panel: C_pin."),
+                ("t_pulse_min_ns", "Min pulse width:", "ns", "MCU panel: Min pulse width."),
                 ("vil_v", "VIL:", "V", "VIL factor × VDD (MCU panel)."),
-                ("vih_v", "VIH:", "V", "VIH factor × VDD (MCU panel)."),
-                ("v_high", "V_high:", "V",
-                 "Lowest solved pin voltage at the Logic High input\n"
-                 "(R1 max, R2 min, typical Zener): the level a high pulse settles to.")):
+                ("vih_v", "VIH:", "V", "VIH factor × VDD (MCU panel).")):
             r = ctk.CTkFrame(auto, fg_color="transparent")
             r.pack(fill="x", pady=1)
             ctk.CTkLabel(r, text=label, width=LBL_W, text_color=MUTED, anchor="w").pack(side="left")
@@ -365,51 +515,18 @@ class BandwidthInputPanel(_FieldPanel):
             _help_btn(r, tip)
             self.derived[name] = lbl
 
-        def section(title):
-            ctk.CTkLabel(self, text=title, font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(10, 2))
-            f = ctk.CTkFrame(self, fg_color="transparent")
-            f.pack(fill="x", padx=5)
-            return f
-
-        def entry_row(parent, key, label, unit, tip):
-            r = ctk.CTkFrame(parent, fg_color="transparent")
-            r.pack(fill="x", pady=2)
-            ctk.CTkLabel(r, text=label, width=LBL_W).pack(side="left")
-            self._entry(r, key, ENT_W).pack(side="left", padx=2)
-            ctk.CTkLabel(r, text=unit, width=UNIT_W).pack(side="left")
-            _help_btn(r, tip)
-
-        cap = section("Capacitance")
-        entry_row(cap, "bw.c_diode_pf", "C_diode:", "pF",
-                  "Protection diode capacitance at 0 V reverse bias (worst case).\n"
-                  "BZB984-C3V3: Cd max 450 pF (Nexperia BZB984 datasheet Rev 3, Table 8).")
-        entry_row(cap, "bw.c_pin_pf", "C_pin:", "pF",
-                  "MCU GPIO input capacitance.\n"
-                  "STM32G4: CIO 5 pF typ (DS12983 Rev 5, Table 54).")
-        entry_row(cap, "bw.c_stray_pf", "C_stray:", "pF",
-                  "PCB parasitic/stray capacitance estimate.\nTypically 2-5 pF. Depends on trace length and layout.")
-
-        dig = section("Digital Sampling")
-        entry_row(dig, "bw.f_peripheral_mhz", "f_periph:", "MHz",
-                  "Peripheral clock frequency that samples the input pin.\n"
-                  "STM32G4: up to 170 MHz (DS12983 Rev 5, Table 17).")
-        entry_row(dig, "bw.n_samples", "N_samples:", "",
-                  "Minimum consecutive samples required for valid edge detection.\n"
-                  "Find in the MCU reference manual under timer/input capture digital filter settings.")
-
-        cnt = section("Counter Overflow")
-        entry_row(cnt, "bw.counter_bits", "Bits:", "",
-                  "Hardware counter width in bits (e.g. 16 or 32).\n"
-                  "STM32G4: TIM3/TIM4 16-bit, TIM2/TIM5 32-bit (DS12983 Rev 5, Table 7).")
-        r = ctk.CTkFrame(cnt, fg_color="transparent")
-        r.pack(fill="x", pady=2)
-        ctk.CTkLabel(r, text="Signed:", width=LBL_W).pack(side="left")
-        self._checkbox(r, "bw.counter_signed", ENT_W).pack(side="left", padx=2)
-        ctk.CTkLabel(r, text="", width=UNIT_W).pack(side="left")
-        _help_btn(r, "Check if the counter counts +/- (signed).\n"
-                     "Uses one bit for sign: 2^(N-1) counts instead of 2^N.")
-        entry_row(cnt, "bw.f_read_hz", "f_read:", "Hz",
-                  "How often firmware reads/resets the counter.\nTypically your PID loop rate or main polling frequency.")
+        ctk.CTkLabel(self, text="Board", font=("", 13, "bold")).pack(anchor="w", padx=5, pady=(10, 2))
+        board = ctk.CTkFrame(self, fg_color="transparent")
+        board.pack(fill="x", padx=5)
+        self._labelled(board, "C_stray:", "bw.c_stray_pf", "pF",
+                       "PCB parasitic/stray capacitance estimate.\n"
+                       "Typically 2-5 pF. Depends on trace length and layout.",
+                       lbl_w=LBL_W, ent_w=ENT_W, unit_w=UNIT_W)
+        self._labelled(board, "Margin factor:", "bw.margin_factor", "",
+                       "\"Reliable up to\" = \"may work up to\" ÷ this factor (1 or more).\n"
+                       "Starting value 1.5: owner's example, 2026-11-09: 1 MHz\n"
+                       "reliable, 1.5 MHz may work.",
+                       lbl_w=LBL_W, ent_w=ENT_W, unit_w=UNIT_W)
 
         self.fill_button = ctk.CTkButton(
             self, text="Fill from starting values", height=28,
@@ -419,12 +536,19 @@ class BandwidthInputPanel(_FieldPanel):
                      text_color=MUTED, font=("", 11)).pack(anchor="w", padx=5)
 
     def refresh_derived(self):
-        """Show the derived inputs AppState passed to the bandwidth model."""
-        bp = self.app_state.bandwidth_params
+        """Show the values the frequency limits take from the other panels."""
+        s = self.app_state
+        values = {
+            "c_diode_pf": s.circuit.v["clamp_diode.capacitance_pf"],
+            "c_pin_pf": s.circuit.v["mcu.c_pin_pf"],
+            "t_pulse_min_ns": s.circuit.v["mcu.t_pulse_min_ns"],
+            "vil_v": s.results["voltages"]["vil"],
+            "vih_v": s.results["voltages"]["vih"],
+        }
         for name, lbl in self.derived.items():
-            v = getattr(bp, name)
+            v = values[name]
             if v is None:
                 lbl.configure(text=NEEDS_INPUT, text_color=MUTED)
             else:
-                text = f"{v:.0f}" if name == "r_tau_ohms" else f"{v:.3f}"
+                text = f"{v:.3f}" if name in ("vil_v", "vih_v") else f"{v:g}"
                 lbl.configure(text=text, text_color=("gray10", "gray90"))

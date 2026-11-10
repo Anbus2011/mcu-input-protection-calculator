@@ -1,8 +1,9 @@
 """
 Encapsulated Matplotlib plotting logic for the V_mcu vs V_input chart.
-Decoupled from the main UI class — receives data arrays, draws to its own canvas.
-When no curve can be computed the axes are cleared and a message says which
-inputs are needed.
+Decoupled from the main UI class and from the solver: it receives plain
+lists from AppState (which sweeps the solver's pin-voltage function) and
+draws them on its own canvas. When no curve can be computed the axes are
+cleared and a message says which inputs are needed.
 """
 from __future__ import annotations
 
@@ -11,9 +12,6 @@ import textwrap
 import customtkinter as ctk
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import numpy as np
-
-from src.models.circuit_model import CalculationResult
 
 
 class PlotCanvas(ctk.CTkFrame):
@@ -53,11 +51,12 @@ class PlotCanvas(ctk.CTkFrame):
     def has_curves(self) -> bool:
         return len(self.ax.lines) > 0
 
-    def refresh(self, result: CalculationResult, message: str = ""):
-        """Draw the curves in result.plot_data; if there are none, clear the
-        plot and show *message* (which inputs are needed)."""
-        self._last = (result, message)
-        pd = result.plot_data or {}
+    def refresh(self, plot_data: dict, message: str = ""):
+        """Draw the curves in *plot_data* (AppState.plot_data: plain lists);
+        if there are none, clear the plot and show *message* (which inputs
+        are needed)."""
+        self._last = (plot_data, message)
+        pd = plot_data or {}
 
         self.ax.clear()
         is_dark = self.theme_var.get() == "Dark"
@@ -90,7 +89,8 @@ class PlotCanvas(ctk.CTkFrame):
 
         # Threshold lines (only those whose inputs are present)
         dash_seq = (5, 3)
-        y_top = max(float(np.max(pd[k])) for k in curves) + 0.2
+        y_top = max(max(pd[k]) for k in curves) + 0.2
+        y_bottom = min(0.0, min(min(pd[k]) for k in curves))
         for key, color, label, phase in (("vdd", "green", "VDD", 0),
                                          ("v_rec_max", "gold", "Safe Max", 4),
                                          ("v_abs_max", "red", "Abs. Max", 2)):
@@ -104,8 +104,8 @@ class PlotCanvas(ctk.CTkFrame):
 
         self.ax.set_xlabel("V_input (V)", color=tc)
         self.ax.set_ylabel("V_mcu (V)", color=tc)
-        self.ax.set_xlim(0, pd["vin_max"])
-        self.ax.set_ylim(0, y_top)
+        self.ax.set_xlim(pd["vin_min"], pd["vin_max"])
+        self.ax.set_ylim(y_bottom - 0.2 if y_bottom < 0 else 0, y_top)
         self.ax.grid(True, alpha=ga, color=tc)
         self.ax.legend(loc="lower right", fontsize=10, facecolor=bg, labelcolor=tc)
         if message:

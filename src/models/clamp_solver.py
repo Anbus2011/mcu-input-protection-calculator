@@ -530,7 +530,7 @@ def solve(design) -> dict:
     def need(key, *names, deps=()):
         miss = []
         for dep in deps:
-            miss.extend(p for p in missing.get(dep, []) if p not in miss)
+            miss.extend(p for p in (missing.get(dep) or ()) if p not in miss)
         for name in names:
             miss.extend(p for p in c.cause[name] if p not in miss)
         if miss:

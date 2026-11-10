@@ -77,7 +77,7 @@ The protection network forms an RC low-pass filter.
 
 ### D. STM32 Specific Constants
 * **Safe Max Limit:** VDDA + 0.3V (Threshold before internal ESD injection begins). The `pin_max_safe` check (highest pin voltage at the maximum input against Safe Max) is the guard against injection.
-* **No injection current estimate** (removed 2026-11-09, approved by the owner). The old formula divided by 100 Ω for the internal ESD path; that number came from the first version of the app and no data sheet gives it. There is no injection check, no Injection Limit field and no `safe_injection_ma` key. *Until step 3 of the div-v2 work switches the app to `clamp_solver.py`, the app and §4B still show the old estimate.*
+* **No injection current estimate** (removed 2026-11-09, approved by the owner). The old formula divided by 100 Ω for the internal ESD path; that number came from the first version of the app and no data sheet gives it. There is no injection check, no Injection Limit field and no `safe_injection_ma` key.
 * **R_s power** (the pin is taken as held at 0 V, so the whole node voltage is across R_s; no 100 Ω anywhere):
   * Typical: $P_{Rs} = V_{typ}^2 / R_s$ (typical node voltage at the maximum input, nominal R_s).
   * Worst case (the `power_rs` check): $P_{Rs} = V_{node,max}^2 / R_{s,min}$, with $V_{node,max}$ the highest node voltage at the maximum input and $R_{s,min}$ R_s at its low tolerance.

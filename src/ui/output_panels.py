@@ -1,22 +1,39 @@
 """
 Output panel classes — tabview components and result tables.
-All display-only; updated via refresh(...) from AppState callbacks.
+All display-only; updated via refresh(app_state) after AppState solved the
+design. Nothing is calculated here: every number and status comes from the
+solver's results.
+
 A value of None means the result can't be computed: the cell shows
-"needs input" (the banner above the tabs names the inputs).
+"needs input" (the banner above the tabs names the inputs). A row whose
+optional input is not given shows "--".
 """
 from __future__ import annotations
 
 import customtkinter as ctk
-from typing import Optional
+from typing import TYPE_CHECKING
 
-from src.models.circuit_model import CalculationResult, McuParams, PASS, WARN, FAIL, INFO
-from src.models.bandwidth_model import BandwidthResult
+from src.models.clamp_solver import FAIL, NEEDS_INPUT as STATUS_NEEDS_INPUT, PASS, TIGHT
 from src.ui.input_panels import _Tooltip, NEEDS_INPUT, MUTED
 
-LEVEL_COLORS = {PASS: "green", WARN: "orange", FAIL: "red", INFO: MUTED}
+if TYPE_CHECKING:
+    from src.core.app_state import AppState
+
+STATUS_COLORS = {PASS: "green", TIGHT: "orange", FAIL: "red"}
+STATUS_MARKS = {PASS: "✓", TIGHT: "⚠", FAIL: "✗"}
 NORMAL = ("gray10", "gray90")
 BLOCKED = "n/a (see note)"
 NO_RS = "no R_s"
+NOT_GIVEN = "--"
+
+# Check id -> name used in the overall verdict line
+CHECK_LABELS = {
+    "pin_max_safe": "Safe Max", "pin_max_abs": "Abs. Max", "pin_min": "Pin Min",
+    "logic_high": "Logic High", "logic_low": "Logic Low",
+    "power_r1": "R1 power", "power_r2": "R2 power", "power_diode": "Clamp diode power",
+    "power_rs": "R_s power", "analog_range": "ADC range", "analog_error": "Analog error",
+    "frequency": "Required frequency",
+}
 
 
 def _show(label, value, fmt: str = "{:.2f}", suffix: str = ""):
@@ -27,12 +44,26 @@ def _show(label, value, fmt: str = "{:.2f}", suffix: str = ""):
         label.configure(text=fmt.format(value) + suffix, text_color=NORMAL)
 
 
-def _show_status(label, status: Optional[tuple]):
-    if status is None:
-        label.configure(text=NEEDS_INPUT, text_color=MUTED)
-    else:
-        text, level = status
-        label.configure(text=text, text_color=LEVEL_COLORS.get(level, NORMAL))
+def _show_text(label, text, color=NORMAL):
+    label.configure(text=text, text_color=color)
+
+
+def status_text(status, detail: str = "") -> tuple:
+    """(text, colour) for a solver status. *detail* replaces the word, as in
+    "✓ 63%" for a margin."""
+    if status is None or status == STATUS_NEEDS_INPUT:
+        return NEEDS_INPUT, MUTED
+    return f"{STATUS_MARKS[status]} {detail or status}", STATUS_COLORS[status]
+
+
+def _show_status(label, status, detail: str = ""):
+    text, color = status_text(status, detail)
+    label.configure(text=text, text_color=color)
+
+
+def _not_given(cells):
+    for label in cells.values():
+        label.configure(text=NOT_GIVEN, text_color=MUTED)
 
 
 # ── Table-row helpers ─────────────────────────────────────────────────────────
@@ -83,6 +114,14 @@ def _cells_row(parent, label, row_num, col_widths, keys, bold_keys):
     return cells
 
 
+def _section(parent, title, first=False):
+    ctk.CTkLabel(parent, text=title, font=("", 13, "bold")).pack(
+        anchor="w", padx=10, pady=(10 if first else 15, 5))
+    frame = ctk.CTkFrame(parent, fg_color="transparent")
+    frame.pack(fill="x", padx=10)
+    return frame
+
+
 # ── Component Analysis Tab ────────────────────────────────────────────────────
 
 class ComponentsTab:
@@ -90,8 +129,7 @@ class ComponentsTab:
         self._build(parent)
 
     def _build(self, parent):
-        ctk.CTkLabel(parent, text="Divider Network", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(10, 5))
-        dt = ctk.CTkFrame(parent, fg_color="transparent"); dt.pack(fill="x", padx=10)
+        dt = _section(parent, "Divider Network", first=True)
         cw = [250, 100, 60]
         _table_header(dt, ["Parameter", "Value", "Unit"], cw)
         self.r_total = _table_row(dt, "Input Impedance (R1+R2)", "kΩ", 1, cw)
@@ -99,18 +137,19 @@ class ComponentsTab:
         self.r_source = _table_row(dt, "ADC Source Impedance (R1∥R2 + R_s)", "kΩ", 3, cw)
         self.p_total = _table_row(dt, "Power Dissipation (typical)", "mW", 4, cw)
 
-        ctk.CTkLabel(parent, text="Component Power (at Max Input)", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
-        ct = ctk.CTkFrame(parent, fg_color="transparent"); ct.pack(fill="x", padx=10)
-        ccw = [70, 90, 85, 85, 85, 95, 95]
+        ct = _section(parent, "Component Power (at Max Input)")
+        ccw = [90, 90, 85, 85, 85, 95, 95]
         tips = [
             None,
-            "Typical current: nominal resistors, typical Zener.\n"
-            "R_s: estimated injection current at the typical node voltage.",
-            "Typical: nominal resistors, typical Zener (VZ nom).",
+            "Typical current: nominal resistors, typical clamp diode column.\n"
+            "Clamp diode: the current leaving the node through the diode.\n"
+            "R_s: the typical node voltage across R_s, pin held at 0 V.",
+            "Typical: nominal resistors, typical clamp diode column.",
             "Worst case: the highest power over the corners R1 min/max × "
-            "R2 min/max × Zener at VZ min (low-voltage corner) / VZ max "
-            "(high-voltage corner), and the typical point.\n"
-            "R_s: worst-case node voltage (V_mcuH), R_s over its tolerance.",
+            "R2 min/max × clamp diode minimum / maximum column, and the "
+            "typical point.\n"
+            "R_s: the highest node voltage across R_s at its low tolerance, "
+            "pin held at 0 V (V² / R_s min).",
             None,
             "Rating margin against the typical power.\nFor information only; "
             "the verdict uses the worst-case margin.",
@@ -123,7 +162,7 @@ class ComponentsTab:
         bold = {"margin_worst"}     # the verdict column
         self.r1_row = _cells_row(ct, "R1", 1, ccw, keys, bold)
         self.r2_row = _cells_row(ct, "R2", 2, ccw, keys, bold)
-        self.z_row = _cells_row(ct, "Zener", 3, ccw, keys, bold)
+        self.diode_row = _cells_row(ct, "Clamp diode", 3, ccw, keys, bold)
         self.rs_row = _cells_row(ct, "R_s", 4, ccw, keys, bold)
 
         vf = ctk.CTkFrame(parent, fg_color="transparent"); vf.pack(anchor="w", padx=10, pady=(4, 0))
@@ -132,43 +171,45 @@ class ComponentsTab:
                                           text_color=MUTED)
         self.power_verdict.pack(side="left", padx=(6, 0))
 
-        ctk.CTkLabel(parent, text="Voltage at MCU Pin (nominal R1/R2)", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
-        vt = ctk.CTkFrame(parent, fg_color="transparent"); vt.pack(fill="x", padx=10)
-        vcw = [200, 100, 60]
+        vt = _section(parent, "Voltage at MCU Pin (nominal R1/R2)")
+        vcw = [220, 100, 60]
         _table_header(vt, ["Condition", "V_mcu", "Unit"], vcw, [
             None,
-            "Nominal R1 and R2 (no tolerance).\nTypical: Zener at VZ nom.\n"
-            "Worst Zener: Zener at VZ max.\nThe full worst case (R1 min, R2 max, "
-            "VZ max) is V_mcuH on the MCU Input tab.",
+            "Nominal R1 and R2 (no tolerance), at Max Input.\n"
+            "Typical: the clamp diode's typical column.\n"
+            "Worst clamp diode: its maximum column.\nThe full worst case (the "
+            "highest of all corners) is V_mcuH on the MCU Input tab.",
             None])
-        self.vclamp_typ = _table_row(vt, "Typical Zener", "V", 1, vcw)
-        self.vclamp_worst = _table_row(vt, "Worst Zener (nominal R)", "V", 2, vcw)
+        self.vclamp_typ = _table_row(vt, "Typical clamp diode", "V", 1, vcw)
+        self.vclamp_worst = _table_row(vt, "Worst clamp diode (nominal R)", "V", 2, vcw)
 
-    def refresh(self, r: CalculationResult):
-        _show(self.r_total, None if r.r_total_ohms is None else r.r_total_ohms / 1000)
-        _show(self.ratio, r.k_nominal, "{:.4f}")
-        _show(self.r_source, None if r.r_source_ohms is None else r.r_source_ohms / 1000)
-        _show(self.p_total, r.p_total_mw, "{:.1f}")
+    def refresh(self, s: AppState):
+        d = s.details
+        _show(self.r_total, None if d["r_total_ohms"] is None else d["r_total_ohms"] / 1000)
+        _show(self.ratio, d["k_nominal"], "{:.4f}")
+        _show(self.r_source, None if d["r_source_ohms"] is None else d["r_source_ohms"] / 1000)
+        _show(self.p_total, d["p_total_mw"], "{:.1f}")
 
-        rows = [(self.r1_row, "r1", r.i_r1_ma, r.r1_rating_mw),
-                (self.r2_row, "r2", r.i_r2_ma, r.r2_rating_mw),
-                (self.z_row, "z", r.i_z_ma, r.z_ptot_mw)]
-        if r.has_rs:
-            rows.append((self.rs_row, "rs", r.i_rs_ma, r.rs_rating_mw))
+        rows = [(self.r1_row, "r1"), (self.r2_row, "r2"), (self.diode_row, "diode")]
+        if d["has_rs"]:
+            rows.append((self.rs_row, "rs"))
         else:
             for lbl in self.rs_row.values():
                 lbl.configure(text=NO_RS, text_color=MUTED)
-        for row, name, i, rating in rows:
-            _show(row["current"], i, "{:.2f}", " mA")
-            _show(row["power"], getattr(r, f"p_{name}_mw"), "{:.1f}", " mW")
-            _show(row["power_worst"], getattr(r, f"p_{name}_worst_mw"), "{:.1f}", " mW")
-            _show(row["rating"], rating, "{:.0f}", " mW")
-            _show_status(row["margin"], getattr(r, f"{name}_margin_status"))
-            _show_status(row["margin_worst"], getattr(r, f"{name}_margin_worst_status"))
+        for row, name in rows:
+            _show(row["current"], d[f"i_{name}_ma"], "{:.2f}", " mA")
+            _show(row["power"], d[f"p_{name}_mw"], "{:.1f}", " mW")
+            _show(row["power_worst"], d[f"p_{name}_worst_mw"], "{:.1f}", " mW")
+            _show(row["rating"], d[f"{name}_rating_mw"], "{:.0f}", " mW")
+            # the typical margin is information: no tick
+            _show(row["margin"], d[f"{name}_margin_pct"], "{:.0f}", "%")
+            pct = d[f"{name}_margin_worst_pct"]
+            _show_status(row["margin_worst"], s.check(f"power_{name}")["status"],
+                         "" if pct is None else f"{pct:.0f}%")
 
-        _show_status(self.power_verdict, r.power_verdict)
-        _show(self.vclamp_typ, r.v_mcu_typ, "{:.3f}")
-        _show(self.vclamp_worst, r.v_mcu_worst_zener, "{:.3f}")
+        _show_status(self.power_verdict, d["power_verdict"])
+        _show(self.vclamp_typ, d["v_pin_typ"], "{:.3f}")
+        _show(self.vclamp_worst, d["v_pin_diode_max"], "{:.3f}")
 
 
 # ── MCU Input / Safety Tab ────────────────────────────────────────────────────
@@ -178,68 +219,135 @@ class SafetyTab:
         self._build(parent)
 
     def _build(self, parent):
-        ctk.CTkLabel(parent, text="Voltage Limits (at Max Input)", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(10, 5))
-        vt = ctk.CTkFrame(parent, fg_color="transparent"); vt.pack(fill="x", padx=10)
-        vw = [150, 90, 90, 90, 90]
+        vt = _section(parent, "Voltage Limits", first=True)
+        vw = [170, 90, 90, 90, 90]
         vt_tips = [
             None,
-            "V_mcuH: worst-case voltage at the MCU pin.\nR1 min, R2 max (tolerance) and Zener at VZ max,\nat maximum input voltage.\nNot the same as 'Worst Zener (nominal R)'\non the Component Analysis tab.",
-            "The MCU voltage threshold being compared against.\nSafe Max = recommended operating limit.\nAbs Max = damage threshold from datasheet.",
-            "How much headroom remains: Limit minus V_mcu.\nPositive = safe, negative = exceeded.",
-            "PASS = safe margin.\nTIGHT = within spec but close.\nFAIL = limit exceeded.",
+            "At Max Input: V_mcuH, the highest voltage at the MCU pin over all\n"
+            "corners (R1 min/max, R2 min/max, clamp diode minimum/maximum\n"
+            "column). Not the same as 'Worst clamp diode (nominal R)' on the\n"
+            "Component Analysis tab.\n"
+            "At Min Input: V_mcuL, the lowest pin voltage over the same corners.",
+            "The MCU voltage threshold being compared against.\n"
+            "Safe Max = recommended operating limit. It is the guard against\n"
+            "current into the pin's protection diodes: there is no separate\n"
+            "injection-current estimate.\n"
+            "Abs Max = damage threshold from datasheet.\n"
+            "Pin Min = lowest allowed pin voltage.",
+            "How much headroom remains to the limit.\nPositive = safe, negative = exceeded.",
+            "PASS = safe margin (50 mV to Safe Max, 100 mV to Abs Max).\n"
+            "TIGHT = within the limit but close.\nFAIL = limit exceeded.\n"
+            "Pin Min: PASS or FAIL only.",
         ]
-        _table_header(vt, ["Parameter", "V_mcuH", "Limit", "Margin", "Status"], vw, vt_tips)
+        _table_header(vt, ["Parameter", "V_mcu", "Limit", "Margin", "Status"], vw, vt_tips)
         keys = ["value", "limit", "margin", "status"]
-        self.rec_row = _cells_row(vt, "vs Safe Max", 1, vw, keys, {"status"})
-        self.abs_row = _cells_row(vt, "vs Absolute Max", 2, vw, keys, {"status"})
+        self.rec_row = _cells_row(vt, "Max Input vs Safe Max", 1, vw, keys, {"status"})
+        self.abs_row = _cells_row(vt, "Max Input vs Absolute Max", 2, vw, keys, {"status"})
+        self.min_row = _cells_row(vt, "Min Input vs Pin Min", 3, vw, keys, {"status"})
 
-        ctk.CTkLabel(parent, text="Injection Current (estimate)", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
-        it = ctk.CTkFrame(parent, fg_color="transparent"); it.pack(fill="x", padx=10)
-        iw = [150, 90, 90, 100]
-        it_tips = [
-            None,
-            "Estimate of the current into the MCU's internal ESD clamp\n"
-            "once the worst-case pin voltage passes VDD + 0.3 V:\n"
-            "I_inj = max(0, V_mcu − (VDD + 0.3 V)) / (R_s min + 100 Ω).\n"
-            "R_s min = R_s at its low tolerance; 100 Ω stands for the\n"
-            "internal ESD path. Rough model only: on STM32G4 FT/TT pins\n"
-            "positive injection is not possible at all (DS12983 Rev 5,\n"
-            "Table 15, note 3).",
-            "Maximum safe injection current from the\nMCU datasheet (absolute max rating).",
-            "OK = well within limit.\nMARGINAL = approaching limit.\nHIGH = exceeds safe injection current.",
-        ]
-        _table_header(it, ["Parameter", "Value", "Limit", "Status"], iw, it_tips)
-        self.inj_row = _cells_row(it, "Estimate (approx.)", 1, iw, ["value", "limit", "status"], {"status"})
-
-        ctk.CTkLabel(parent, text="ADC Performance", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
-        at = ctk.CTkFrame(parent, fg_color="transparent"); at.pack(fill="x", padx=10)
-        aw = [150, 100, 80]
+        at = _section(parent, "ADC Performance")
+        aw = [170, 100, 80]
         _table_header(at, ["Parameter", "Value", "Unit"], aw)
         self.source_z = _table_row(at, "Source Impedance", "kΩ", 1, aw)
-        self.sample_cyc = _table_row(at, "Min Sample Cycles", "cycles", 2, aw)
-        self.resolution = _table_row(at, "Resolution", "mV/LSB", 3, aw)
+        self.resolution = _table_row(at, "Resolution", "mV/LSB", 2, aw)
 
-    def refresh(self, r: CalculationResult, mcu: McuParams):
-        for row, limit, margin, status in (
-                (self.rec_row, mcu.v_recommended_max, r.margin_rec_v, r.rec_status),
-                (self.abs_row, mcu.v_absolute_max, r.margin_abs_v, r.abs_status)):
-            _show(row["value"], r.v_mcu_worst, "{:.3f}", " V")
-            _show(row["limit"], limit, "{:.2f}", " V")
+        et = _section(parent, "Analog Error (at ADC Scale, nominal R1/R2)")
+        ew = [170, 90, 90, 90, 90, 90]
+        _table_header(et, ["Parameter", "Error", "Percent", "LSB", "Allowed", "Status"], ew, [
+            None,
+            "Pin voltage with the clamp diode minus the pin voltage without it,\n"
+            "at the ADC Scale input with nominal R1 and R2. The larger error of\n"
+            "the diode's minimum and maximum columns. Negative = the diode\n"
+            "pulls the reading down.",
+            "The error as a percentage of the pin voltage without the diode.",
+            "The error in ADC steps (VDD / 2^N).",
+            "Allowed analog error (System panel). Without it the error is\n"
+            "shown for information only.",
+            "PASS = the size of the error is within the allowed error.",
+        ])
+        self.error_row = _cells_row(et, "Clamp diode error", 1, ew,
+                                    ["mv", "pct", "lsb", "allowed", "status"], {"status"})
+
+        it = _section(parent, "Information (no verdict)")
+        iw = [250, 100, 60]
+        _table_header(it, ["Parameter", "Value", "Unit"], iw, [
+            None,
+            "Shown for information: these rows change no verdict.\n"
+            "Touch rows: the highest of all corners at the Touch voltage.\n"
+            "Rail current: the highest of all corners at Max Input, when the\n"
+            "clamp diode is connected to VDD.",
+            None])
+        self.touch_pin = _table_row(it, "Touch: highest pin voltage", "V", 1, iw)
+        self.touch_diode = _table_row(it, "Touch: clamp diode current", "mA", 2, iw)
+        self.touch_r1 = _table_row(it, "Touch: R1 power", "mW", 3, iw)
+        self.rail_current = _table_row(it, "Current into the VDD rail (Max Input)", "mA", 4, iw)
+
+    def refresh(self, s: AppState):
+        d = s.details
+        for row, check_id, margin in ((self.rec_row, "pin_max_safe", d["margin_rec_v"]),
+                                      (self.abs_row, "pin_max_abs", d["margin_abs_v"])):
+            c = s.check(check_id)
+            _show(row["value"], c["value"], "{:.3f}", " V")
+            _show(row["limit"], c["limit"], "{:.2f}", " V")
             _show(row["margin"], None if margin is None else margin * 1000, "{:+.0f}", " mV")
-            _show_status(row["status"], status)
+            _show_status(row["status"], c["status"])
 
-        _show(self.inj_row["value"], r.i_injection_ma, "{:.2f}", " mA")
-        _show(self.inj_row["limit"], mcu.safe_injection_ma, "{:.1f}", " mA")
-        _show_status(self.inj_row["status"], r.inj_status)
+        c = s.check("pin_min")
+        if c is None:           # no Min Input, or it is not negative
+            _not_given(self.min_row)
+        else:
+            margin = None if c["value"] is None or c["limit"] is None \
+                else (c["value"] - c["limit"]) * 1000
+            _show(self.min_row["value"], c["value"], "{:.3f}", " V")
+            _show(self.min_row["limit"], c["limit"], "{:.2f}", " V")
+            _show(self.min_row["margin"], margin, "{:+.0f}", " mV")
+            _show_status(self.min_row["status"], c["status"])
 
-        _show(self.source_z, None if r.r_source_ohms is None else r.r_source_ohms / 1000)
-        _show(self.sample_cyc, r.min_sample_cycles, "{}")
-        _show(self.resolution, r.resolution_mv_per_lsb)
+        _show(self.source_z, None if d["r_source_ohms"] is None else d["r_source_ohms"] / 1000)
+        _show(self.resolution, d["resolution_mv_per_lsb"])
+
+        c = s.check("analog_error")
+        if c is None:           # no ADC Scale
+            _not_given(self.error_row)
+        else:
+            _show(self.error_row["mv"], d["analog_error_mv"], "{:+.1f}", " mV")
+            _show(self.error_row["pct"], d["analog_error_pct"], "{:+.2f}", " %")
+            _show(self.error_row["lsb"], d["analog_error_lsb"], "{:+.1f}")
+            if c["limit"] is None:
+                _show_text(self.error_row["allowed"], NOT_GIVEN, MUTED)
+                if c["value"] is None:
+                    _show_status(self.error_row["status"], None)
+                else:
+                    _show_text(self.error_row["status"], "info", MUTED)
+            else:
+                _show(self.error_row["allowed"], c["limit"], "{:.2f}", " %")
+                _show_status(self.error_row["status"], c["status"])
+
+        for label, info_id, fmt in ((self.touch_pin, "touch_pin_high", "{:.3f}"),
+                                    (self.touch_diode, "touch_diode_current", "{:.2f}"),
+                                    (self.touch_r1, "touch_r1_power", "{:.1f}"),
+                                    (self.rail_current, "rail_current", "{:.3f}")):
+            row = s.info(info_id)
+            if row is None:     # no Touch voltage / diode not connected to VDD
+                _show_text(label, NOT_GIVEN, MUTED)
+            else:
+                _show(label, row["value"], fmt)
 
 
-# ── Operating Points Tab ──────────────────────────────────────────────────────
+# ── Input Levels Tab ──────────────────────────────────────────────────────────
 
 class OperatingTab:
+    """Pin voltage at each input level, with the check that level feeds."""
+
+    # level id, row label, check id
+    ROWS = (("min_input", "Min Input", "pin_min"), ("zero", "0V", None),
+            ("logic_low", "Logic Low", "logic_low"), ("logic_high", "Logic High", "logic_high"),
+            ("analog_fullscale", "ADC Scale", "analog_range"),
+            ("max_input", "Max Input", "pin_max_abs"), ("touch", "Touch", None))
+    REQUIREMENTS = {"pin_min": "≥ {:.2f}V pin min", "logic_low": "< VIL {:.2f}V",
+                    "logic_high": "> VIH {:.2f}V", "analog_range": "≤ VDD {:.2f}V",
+                    "pin_max_abs": "≤ {:.1f}V abs"}
+
     def __init__(self, parent: ctk.CTkFrame):
         self._build(parent)
 
@@ -255,104 +363,96 @@ class OperatingTab:
                          anchor="w", fg_color=("gray80", "gray25")).grid(
                 row=0, column=i, padx=1, pady=1, sticky="ew")
 
-        self.rows = []
-        row_labels = ["0V", "Logic Low", "Logic High", "ADC Scale", "Max Input"]
-        for i, label in enumerate(row_labels):
+        self.rows = {}
+        for i, (level, label, _check) in enumerate(self.ROWS):
             rn = i + 1
             bg = ("gray90", "gray20") if i % 2 == 0 else ("gray95", "gray17")
             ctk.CTkLabel(self.table, text=label, width=widths[0], anchor="w",
                          font=("", 13), fg_color=bg).grid(row=rn, column=0, padx=1, pady=1, sticky="ew")
             cells = {}
             for j, (key, w) in enumerate(zip(["v_in", "v_mcu_l", "v_mcu_h", "thresh", "status"],
-                                              widths[1:]), start=1):
+                                             widths[1:]), start=1):
                 bold = key in ("v_mcu_h", "status")
                 c = ctk.CTkLabel(self.table, text=NEEDS_INPUT, width=w, anchor="w",
                                  font=("", 13, "bold") if bold else ("", 13), fg_color=bg,
                                  text_color=MUTED)
                 c.grid(row=rn, column=j, padx=1, pady=1, sticky="ew")
                 cells[key] = c
-            self.rows.append(cells)
+            self.rows[level] = cells
+        ctk.CTkLabel(parent, text="V_mcuL / V_mcuH: the lowest / highest pin voltage over all "
+                                  "corners (R1, R2 tolerance; clamp diode minimum and "
+                                  "maximum columns).",
+                     text_color=MUTED, font=("", 11), wraplength=600, justify="left").pack(
+            anchor="w", padx=10)
 
-    def refresh(self, r: CalculationResult):
-        ops = r.operating_points or [{}] * len(self.rows)
-        for cells, op in zip(self.rows, ops):
-            _show(cells["v_in"], op.get("v_in"), "{:.2f}", " V")
-            _show(cells["v_mcu_l"], op.get("v_mcu_l"), "{:.3f}", " V")
-            _show(cells["v_mcu_h"], op.get("v_mcu_h"), "{:.3f}", " V")
-            req = op.get("requirement")
-            if req is None:
-                cells["thresh"].configure(text=NEEDS_INPUT, text_color=MUTED)
+    def refresh(self, s: AppState):
+        for level, _label, check_id in self.ROWS:
+            cells, row = self.rows[level], s.level(level)
+            if row is None:         # optional level, not given
+                _not_given(cells)
+                continue
+            _show(cells["v_in"], row["v_in"], "{:.2f}", " V")
+            _show(cells["v_mcu_l"], row["low"], "{:.3f}", " V")
+            _show(cells["v_mcu_h"], row["high"], "{:.3f}", " V")
+            check = s.check(check_id) if check_id else None
+            if check is None:       # 0 V, Touch, or a Min Input that is not negative
+                _show_text(cells["thresh"], NOT_GIVEN, MUTED)
+                _show_text(cells["status"], "Zero ref" if level == "zero" else "info", MUTED)
             else:
-                cells["thresh"].configure(text=req, text_color=NORMAL)
-            st = op.get("status")
-            _show_status(cells["status"], None if st is None else (st, op.get("level")))
+                if check["limit"] is None:
+                    _show_text(cells["thresh"], NEEDS_INPUT, MUTED)
+                else:
+                    _show_text(cells["thresh"],
+                               self.REQUIREMENTS[check_id].format(check["limit"]))
+                _show_status(cells["status"], check["status"])
 
 
-# ── Bandwidth / PPS Results Tab ───────────────────────────────────────────────
+# ── Signal Bandwidth Results Tab ──────────────────────────────────────────────
 
 class BandwidthTab:
-    """Displays the computed bandwidth / PPS analysis results."""
+    """What input frequency the pin can handle (at the pin, 50 % duty)."""
 
     def __init__(self, parent: ctk.CTkFrame):
         self._build(parent)
 
     def _build(self, parent):
         cw = [200, 120, 80]
-        ctk.CTkLabel(parent, text="RC Filter Characteristics", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(10, 5))
-        ft = ctk.CTkFrame(parent, fg_color="transparent"); ft.pack(fill="x", padx=10)
+        ft = _section(parent, "RC Filter", first=True)
         _table_header(ft, ["Parameter", "Value", "Unit"], cw)
         self.c_total = _table_row(ft, "C_total", "pF", 1, cw)
         self.tau = _table_row(ft, "Time constant (τ)", "ns", 2, cw)
-        self.f_3db = _table_row(ft, "-3 dB bandwidth", "MHz", 3, cw)
-        self.t_rise = _table_row(ft, "10–90% rise time", "ns", 4, cw)
 
-        ctk.CTkLabel(parent, text="Threshold Timing", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
-        tt = ctk.CTkFrame(parent, fg_color="transparent"); tt.pack(fill="x", padx=10)
+        tt = _section(parent, "Edge Timing")
         _table_header(tt, ["Parameter", "Value", "Unit"], cw)
-        self.t_undef_rise = _table_row(tt, "Undefined zone (rise)", "ns", 1, cw)
-        self.t_undef_fall = _table_row(tt, "Undefined zone (fall)", "ns", 2, cw)
+        self.t_rise = _table_row(tt, "Rising edge to VIH", "ns", 1, cw)
+        self.t_fall = _table_row(tt, "Falling edge to VIL", "ns", 2, cw)
+        self.t_shortest = _table_row(tt, "Shortest usable pulse", "ns", 3, cw)
 
-        ctk.CTkLabel(parent, text="Maximum Frequency Limits", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
-        lt = ctk.CTkFrame(parent, fg_color="transparent"); lt.pack(fill="x", padx=10)
+        lt = _section(parent, "Input Frequency")
         _table_header(lt, ["Limit", "Value", "Unit"], cw)
-        self.f_analog = _table_row(lt, "Analog (conservative)", "kHz", 1, cw)
-        self.f_practical = _table_row(lt, "Analog (practical)", "kHz", 2, cw)
-        self.f_digital = _table_row(lt, "Digital sampling", "kHz", 3, cw)
-        self.f_overflow = _table_row(lt, "Counter overflow", "kHz", 4, cw)
-
-        ctk.CTkLabel(parent, text="Effective Limit", font=("", 13, "bold")).pack(anchor="w", padx=10, pady=(15, 5))
-        et = ctk.CTkFrame(parent, fg_color="transparent"); et.pack(fill="x", padx=10)
-        _table_header(et, ["Bottleneck", "Max PPS", "Unit"], cw)
-        self.f_effective = _table_row(et, "--", "kHz", 1, cw)
-        self._eff_label = et.grid_slaves(row=1, column=0)[0]
+        self.f_may_work = _table_row(lt, "May work up to", "kHz", 1, cw)
+        self.f_reliable = _table_row(lt, "Reliable up to", "kHz", 2, cw)
 
         self.note = ctk.CTkLabel(parent, text="", text_color="red", justify="left",
                                  anchor="w", wraplength=420)
         self.note.pack(anchor="w", padx=10, pady=(8, 5))
 
-    def refresh(self, r: BandwidthResult):
-        def cell(label, key, value, fmt):
-            if value is None and key in r.blocked:
+    def refresh(self, s: AppState):
+        d = s.details
+        note = d["frequency_note"]
+
+        def cell(label, value, fmt):
+            if value is None and note:
                 label.configure(text=BLOCKED, text_color="red")
             else:
                 _show(label, value, fmt)
 
         khz = lambda v: None if v is None else v / 1e3
-        cell(self.c_total, "c_total", r.c_total_pf, "{:.1f}")
-        cell(self.tau, "tau", r.tau_ns, "{:.2f}")
-        cell(self.f_3db, "f_3db", None if r.f_3db_hz is None else r.f_3db_hz / 1e6, "{:.3f}")
-        cell(self.t_rise, "t_rise", r.t_rise_ns, "{:.2f}")
-        cell(self.t_undef_rise, "t_undefined_rise", r.t_undefined_rise_ns, "{:.2f}")
-        cell(self.t_undef_fall, "t_undefined_fall", r.t_undefined_fall_ns, "{:.2f}")
-        cell(self.f_analog, "analog", khz(r.f_max_analog_hz), "{:.1f}")
-        cell(self.f_practical, "practical", khz(r.f_max_practical_hz), "{:.1f}")
-        cell(self.f_digital, "digital", khz(r.f_max_digital_hz), "{:.1f}")
-        cell(self.f_overflow, "overflow", khz(r.f_max_overflow_hz), "{:.1f}")
-        cell(self.f_effective, "effective", khz(r.f_max_effective_hz), "{:.1f}")
-        self._eff_label.configure(text=r.limiting_factor or "--")
-
-        reasons = []
-        for reason in r.blocked.values():
-            if reason not in reasons:
-                reasons.append(reason)
-        self.note.configure(text="\n".join(reasons))
+        _show(self.c_total, d["c_total_pf"], "{:.1f}")
+        _show(self.tau, d["tau_ns"], "{:.2f}")
+        cell(self.t_rise, d["t_rise_ns"], "{:.2f}")
+        cell(self.t_fall, d["t_fall_ns"], "{:.2f}")
+        cell(self.t_shortest, d["t_pulse_shortest_ns"], "{:.2f}")
+        cell(self.f_may_work, khz(d["f_may_work_hz"]), "{:.1f}")
+        cell(self.f_reliable, khz(d["f_reliable_hz"]), "{:.1f}")
+        self.note.configure(text=note or "")

@@ -227,3 +227,25 @@ V1_FILE = {
     "system": {"v_input_max": 30.0, "v_analog_fullscale": 4.1, "v_logic_high_min": 3.0,
                "v_logic_low_max": 1.0},
 }
+
+
+# ── The same designs as the user would type them into the app ────────────────
+
+def typed(design=None):
+    """(fields, tables): the field text and table cell text of *design* (the
+    baseline by default), as AppState holds them."""
+    from src.core.app_state import AppState
+    fields, tables, _ = AppState.parse_file_data(design or zener_reference())
+    return fields, tables
+
+
+def app_state(design=None):
+    """An AppState with *design* (the baseline by default) entered through
+    set_fields and set_table, the way the UI does it. It is unsaved."""
+    from src.core.app_state import AppState
+    fields, tables = typed(design)
+    s = AppState()
+    for name, rows in tables.items():
+        s.set_table(name, rows)
+    s.set_fields(fields)
+    return s

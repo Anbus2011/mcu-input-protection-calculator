@@ -14,15 +14,15 @@ from tkinter import filedialog, messagebox
 from PIL import Image, ImageDraw, ImageTk
 
 from src.core.app_state import AppState, LoadError
-from src.models.circuit_model import CalculationResult
-from src.models.bandwidth_model import BandwidthResult
 from src.ui.input_panels import (
-    ResistorPanel, ZenerPanel, McuPanel, SystemPanel, NotesPanel,
-    BandwidthInputPanel,
+    ResistorPanel, ClampDiodePanel, McuPanel, SystemPanel, NotesPanel,
+    BandwidthInputPanel, MUTED,
 )
 from src.ui.output_panels import (
-    ComponentsTab, SafetyTab, OperatingTab, BandwidthTab,
+    ComponentsTab, SafetyTab, OperatingTab, BandwidthTab, CHECK_LABELS,
+    status_text,
 )
+from src.models.clamp_solver import FAIL, TIGHT
 from src.ui.plot_canvas import PlotCanvas
 
 
@@ -45,7 +45,6 @@ class MainWindow(ctk.CTk):
         self.app_state = AppState()
         self.app_state.set_title_callback(self._on_title_changed)
         self.app_state.set_results_callback(self._on_results_changed)
-        self.app_state.set_bandwidth_callback(self._on_bandwidth_changed)
         self.app_state.set_fields_callback(self._sync_fields_from_state)
         self._refresh_pending = False
 
@@ -178,7 +177,8 @@ class MainWindow(ctk.CTk):
             messagebox.showerror("Error", f"Failed to open file:\n{e}")
             return
         if warnings:
-            messagebox.showwarning("Loaded With Blank Fields", "\n\n".join(warnings))
+            messagebox.showwarning("Loaded With Blank or Unusable Values",
+                                   "\n\n".join(warnings))
 
     def _save_blocked(self) -> bool:
         """Unreadable text blocks saving: say which fields, and return True."""
@@ -228,14 +228,14 @@ class MainWindow(ctk.CTk):
         main.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Left panel — inputs
-        left = ctk.CTkScrollableFrame(main, width=450)
+        left = ctk.CTkScrollableFrame(main, width=470)
         left.pack(side="left", fill="y", padx=(0, 5))
 
         self.resistor_panel = ResistorPanel(left, self.app_state)
         self.resistor_panel.pack(fill="x", pady=5)
 
-        self.zener_panel = ZenerPanel(left, self.app_state)
-        self.zener_panel.pack(fill="x", pady=5)
+        self.diode_panel = ClampDiodePanel(left, self.app_state)
+        self.diode_panel.pack(fill="x", pady=5)
 
         self.mcu_panel = McuPanel(left, self.app_state)
         self.mcu_panel.pack(fill="x", pady=5)
@@ -246,17 +246,22 @@ class MainWindow(ctk.CTk):
         self.notes_panel = NotesPanel(left, self.app_state)
         self.notes_panel.pack(fill="x", pady=5)
 
-        self.field_panels = [self.resistor_panel, self.zener_panel, self.mcu_panel,
+        self.field_panels = [self.resistor_panel, self.diode_panel, self.mcu_panel,
                              self.system_panel]
 
         # Right panel — outputs
         right = ctk.CTkFrame(main)
         right.pack(side="right", fill="both", expand=True)
 
+        # Overall verdict: the worst status among the checks
+        self.verdict = ctk.CTkLabel(right, text="", anchor="w", justify="left",
+                                    wraplength=880, font=("", 14, "bold"))
+        self.verdict.pack(fill="x", padx=10, pady=(5, 0))
+
         # Input report: what's needed, what's wrong, solver warnings
         self.banner = ctk.CTkLabel(right, text="", anchor="w", justify="left",
                                    wraplength=880, text_color="orange")
-        self.banner.pack(fill="x", padx=10, pady=(5, 0))
+        self.banner.pack(fill="x", padx=10, pady=(2, 0))
 
         # Tabs
         self.tabs = ctk.CTkTabview(right, height=280)
@@ -268,7 +273,10 @@ class MainWindow(ctk.CTk):
         tab_bw = self.tabs.add("Signal Bandwidth")
 
         self.components_tab = ComponentsTab(tab_comp)
-        self.safety_tab = SafetyTab(tab_safety)
+        safety_scroll = ctk.CTkScrollableFrame(tab_safety, fg_color="transparent",
+                                               height=300)
+        safety_scroll.pack(fill="both", expand=True)
+        self.safety_tab = SafetyTab(safety_scroll)
         self.operating_tab = OperatingTab(tab_op)
 
         # Bandwidth tab: split into input (left) and results (right)
@@ -294,7 +302,7 @@ class MainWindow(ctk.CTk):
     # ── State → UI synchronisation ────────────────────────────────────────
 
     def _sync_fields_from_state(self):
-        """AppState changed field text itself (load, new, preset, fill)."""
+        """AppState changed field text itself (load, new, fill, table rows)."""
         for panel in self.field_panels:
             panel.sync_from_state()
         self.notes_panel.sync_from_state()
@@ -302,10 +310,7 @@ class MainWindow(ctk.CTk):
     def _on_title_changed(self, title: str):
         self.title(title)
 
-    def _on_results_changed(self, result: CalculationResult):
-        self._schedule_refresh()
-
-    def _on_bandwidth_changed(self, result: BandwidthResult):
+    def _on_results_changed(self, results: dict):
         self._schedule_refresh()
 
     def _schedule_refresh(self):
@@ -317,27 +322,22 @@ class MainWindow(ctk.CTk):
     def _refresh_outputs(self):
         self._refresh_pending = False
         s = self.app_state
-        r = s.result
-        self.components_tab.refresh(r)
-        self.safety_tab.refresh(r, s.mcu)
-        self.operating_tab.refresh(r)
-        self.bandwidth_tab.refresh(s.bw_result)
+        self.components_tab.refresh(s)
+        self.safety_tab.refresh(s)
+        self.operating_tab.refresh(s)
+        self.bandwidth_tab.refresh(s)
         self.bw_input_panel.refresh_derived()
-        self.zener_panel.refresh_preset()
+
+        # Overall verdict, naming the checks that fail or are tight
+        verdict = s.results["verdict"]
+        text, color = status_text(verdict)
+        named = [CHECK_LABELS[c["id"]] for c in s.results["checks"]
+                 if c["status"] == verdict and verdict in (FAIL, TIGHT)]
+        self.verdict.configure(
+            text=f"Overall verdict: {text}" + (f"  ({', '.join(named)})" if named else ""),
+            text_color=color)
 
         lines = s.report.lines()
         self.banner.configure(text="\n".join(lines) if lines else "All inputs present.",
-                              text_color="orange" if lines else "gray60")
-
-        typ_keys = s.missing_keys("plot.typ")
-        worst_keys = s.missing_keys("plot.worst")
-        if typ_keys and worst_keys:
-            keys = typ_keys + [k for k in worst_keys if k not in typ_keys]
-            msg = "Plot needs input: " + s.describe_keys(keys)
-        elif typ_keys:
-            msg = "Typical curve needs input: " + s.describe_keys(typ_keys)
-        elif worst_keys:
-            msg = "Worst-case curve needs input: " + s.describe_keys(worst_keys)
-        else:
-            msg = ""
-        self.plot.refresh(r, msg)
+                              text_color="orange" if lines else MUTED)
+        self.plot.refresh(s.plot_data, s.plot_message)
