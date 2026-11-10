@@ -408,6 +408,26 @@ Use full paths: the Python that has the packages of `requirements.txt` installed
 
 ---
 
+## The Skill
+
+`skill/SKILL.md` is the Claude skill that designs the protection network for one input and writes its `.div`. It holds the workflow from requirements to bench check, the rules and the report template. It does no math: every result comes from the MCP server above, so the server must be registered in Claude Desktop as well. `skill/SKILL.md` is the master copy: change it there, never in the copy installed in Claude.
+
+`SKILL.md` states its own version and the solver version it was written and tested for. At the start of every session the skill calls `solver_info` and stops if the server runs another solver version. It then solves its copies of the two example files through `solve_div` and stops if the results differ from the stored ones. A test fails if the solver version in `SKILL.md` is not the solver's, or if `SKILL.md` names a tool or a field the server does not have.
+
+### Building the package
+
+```bash
+python skill/build_package.py
+```
+
+This writes `dist/mcu-input-protection.zip` and prints its path and contents. The zip holds one folder, `mcu-input-protection/` (the `name` in the front matter of `SKILL.md`), with `SKILL.md` and `examples/` (the two `.div` copies) and nothing else: the server is not in the package, it runs from this folder. `dist/` is in `.gitignore`, so the package is built, not committed. To write it somewhere else, give the folder: `python skill/build_package.py some/folder`.
+
+### Installing it in Claude Desktop
+
+Upload the zip in Claude Desktop's skill settings (Settings > Capabilities > Skills) and switch the skill on. After any change to `skill/SKILL.md` or to the example files, build the package and upload it again.
+
+---
+
 ## Project Structure
 
 ```
@@ -428,6 +448,8 @@ mcu-input-protection-calculator/
 ├── examples/                     # Two example designs (format 2.0)
 │
 ├── skill/
+│   ├── SKILL.md                  # The Claude skill: workflow, rules, report template
+│   ├── build_package.py          # Builds the skill package for Claude Desktop into dist/
 │   ├── server.py                 # MCP server: solves and plots a .div for a Claude chat
 │   ├── plot_png.py               # Headless PNG of the plot, for the server
 │   └── examples/                 # Copies of examples/, for the skill's self-test
@@ -455,7 +477,7 @@ mcu-input-protection-calculator/
     └── launch.json               # VS Code debug configuration
 ```
 
-`datasheets/` (data-sheet PDFs) and `docs/screenshots/` are local only: they are listed in `.gitignore` and are not in git.
+`datasheets/` (data-sheet PDFs), `docs/screenshots/` and `dist/` (the built skill package) are local only: they are listed in `.gitignore` and are not in git.
 
 ### Architecture
 
@@ -498,7 +520,7 @@ Everything else about a part (diode tables, capacitance, MCU limits, pin capacit
 python -m pytest tests/ -v
 ```
 
-All 892 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
+All 910 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
 
 ```bash
 python -m pytest tests/ -m "not ui"
