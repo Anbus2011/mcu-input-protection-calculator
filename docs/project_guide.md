@@ -83,4 +83,5 @@ The skill is not built yet. It will be a Claude skill that designs the protectio
 ## 5. Next work
 
 1. Finish the skill in `skill/`. The MCP server and its tests are done (`skill/server.py`, `tests/test_mcp_server.py`: both files in `examples/` solved through the server's tools give their stored results). Still to do: write `SKILL.md`, register the server in Claude Desktop, then test the installed skill live in a Claude chat.
-2. The first real design, made with the skill: the user inputs of a dual-channel motor controller. Its requirements are kept with that board's project, not in this repository.
+2. Solver bench check (later, on a breadboard). Build one divider with a Schottky to a 3.3 V rail, using parts on hand. Any parts will do, as long as the diode has a data sheet for the `.div` tables. Enter the resistors' measured values in the `.div`. Put a load resistor of a few hundred ohms on the 3.3 V rail, since a bench supply can't sink the clamp current. Sweep the input through about 1, 2, 3, 5, 12, 24 and 30 V, read the node with a DMM, and compare with `solve_div`'s typical curve and min/max band. This checks the solver; workflow step 7 checks a real design on a built board.
+3. The first real design, made with the skill: the user inputs of a dual-channel motor controller. Its requirements are kept with that board's project, not in this repository.
