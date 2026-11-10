@@ -372,8 +372,7 @@ mcu-input-protection-calculator/
 │
 ├── docs/
 │   ├── div_v2_format.md          # The .div format 2.0
-│   ├── test_changes.md           # Record of tests removed or rewritten, with reasons
-│   ├── session2_prompt.md        # Historical brief, superseded in part, kept as a record
+│   ├── project_guide.md          # What the app and the skill do, and the workflow
 │   ├── bzb984_fig7_typical.json  # Graph readings behind the Zener example's table (read by the tests)
 │   └── bat54cv_fig1_fig2_typical.json   # Graph readings behind the Schottky example's tables
 ├── examples/                     # Two example designs (format 2.0)

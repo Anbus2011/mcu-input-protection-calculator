@@ -7,7 +7,7 @@ A design lives in a `.div` file (format 2.0, `docs/div_v2_format.md`). A Claude 
 
 When writing or modifying code for this project, you must adhere strictly to the architectural rules and mathematical models defined in this document. What the screen shows (labels, messages, colours, layout) is described in `README.md`.
 
-**Repository files.** `docs/session2_prompt.md` is a historical brief, superseded in part: a record, not instructions. `docs/test_changes.md` is a record of tests that were removed or rewritten, with the reasons. `docs/bzb984_fig7_typical.json` and `docs/bat54cv_fig1_fig2_typical.json` are readings of data-sheet graphs, which the tables of the two example files come from. The tests read `bzb984_fig7_typical.json` (`test_clamp_solver.py`), so don't move or delete these files.
+**Repository files.** `docs/project_guide.md` says what the app does, what the planned skill will do, and the workflow from requirements to an approved design. `docs/bzb984_fig7_typical.json` and `docs/bat54cv_fig1_fig2_typical.json` are readings of data-sheet graphs, which the tables of the two example files come from. The tests read `bzb984_fig7_typical.json` (`test_clamp_solver.py`), so don't move or delete these files.
 
 ## 2. Architecture & State Management
 This project uses a strict Controller/Model/View decoupled architecture.
