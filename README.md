@@ -358,6 +358,49 @@ The summary tells a blank diode table from one that is not modelled: "Forward ta
 
 ---
 
+## MCP Server
+
+`skill/server.py` is an [MCP](https://modelcontextprotocol.io) server that lets a Claude chat use the solver. Claude sends the text of a `.div` file and gets back the results and a plot. The server is a gateway only: it validates and solves with the same code as `divcheck.py`, so it gives the same results. It does no math of its own, chooses no values and reads or writes no design files.
+
+| Tool | What it returns |
+|------|-----------------|
+| `solver_info` | The solver version, the `.div` format version and the git commit the server is running |
+| `solve_div` | Whether the file is valid, every problem as `key.path: message`, the file's text with `results` filled in, and the summary `divcheck.py` prints |
+| `plot_div` | A PNG of pin voltage against input voltage: typical, lowest and highest of the eight corners, with VIL, VIH and the pin limits. It is the same sweep as the app's plot |
+
+All three are read-only and take the `.div` as JSON text, not a file path, so the server can run on another machine. An invalid file is a normal answer (`valid` false and the problems), not an error. Every answer carries the solver version and the commit.
+
+The server needs the `mcp` package (in `requirements.txt`; Python 3.10 or newer, `mcp` 1.x) and `matplotlib` for the plot. It does not use `customtkinter`.
+
+### Running it
+
+```bash
+python skill/server.py                                    # stdio: the form Claude starts
+python skill/server.py --http                             # streamable HTTP at http://127.0.0.1:8000/mcp
+python skill/server.py --http --host 0.0.0.0 --port 8080  # another address and port
+```
+
+Over stdio the server waits for a client on its standard input; stop it with Ctrl+C. The HTTP form has no login: use it on a network you trust.
+
+### Registering it in Claude Desktop
+
+Add the server to `claude_desktop_config.json` (Claude Desktop: Settings > Developer > Edit Config), then restart Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "mcu-input-calculator": {
+      "command": "C:\\path\\to\\python.exe",
+      "args": ["C:\\path\\to\\mcu-input-protection-calculator\\skill\\server.py"]
+    }
+  }
+}
+```
+
+Use full paths: the Python that has the packages of `requirements.txt` installed, and `skill/server.py` in this folder. If the file already has an `mcpServers` section, add the `mcu-input-calculator` entry to it.
+
+---
+
 ## Project Structure
 
 ```
@@ -376,6 +419,10 @@ mcu-input-protection-calculator/
 │   ├── bzb984_fig7_typical.json  # Graph readings behind the Zener example's table (read by the tests)
 │   └── bat54cv_fig1_fig2_typical.json   # Graph readings behind the Schottky example's tables
 ├── examples/                     # Two example designs (format 2.0)
+│
+├── skill/
+│   ├── server.py                 # MCP server: solves and plots a .div for a Claude chat
+│   └── plot_png.py               # Headless PNG of the plot, for the server
 │
 ├── src/
 │   ├── core/

@@ -297,8 +297,8 @@ class TestNoInjectionEstimate:
 
 # ── Part-agnostic: the app names no part, vendor or data sheet ───────────────
 
-# What must not appear, in upper or lower case, in any .py file under src/,
-# in divcheck.py or in main.py (CLAUDE.md §2, "part-agnostic"). Part names
+# What must not appear, in upper or lower case, in any .py file under src/
+# or skill/, in divcheck.py or in main.py (CLAUDE.md §2, "part-agnostic"). Part names
 # and data-sheet values belong in examples/, docs/ and tests/. Each entry is
 # a regular expression; add more here.
 PART_SPECIFIC_PATTERNS = [
@@ -323,6 +323,11 @@ class TestPartAgnostic:
                 "input_panels.py", "output_panels.py", "main_window.py",
                 "plot_canvas.py", "divcheck.py", "main.py"} <= {
                     os.path.basename(p) for p in paths}
+        # the MCP server and anything else in skill/
+        skill = [os.path.join(root, "skill", name)
+                 for name in os.listdir(os.path.join(root, "skill")) if name.endswith(".py")]
+        assert {"server.py", "plot_png.py"} <= {os.path.basename(p) for p in skill}
+        paths += skill
         found = []
         for path in sorted(paths):
             with open(path, encoding="utf-8") as f:

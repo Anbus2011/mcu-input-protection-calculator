@@ -262,6 +262,13 @@ def read_json(filepath: str):
             text = f.read()
     except (OSError, UnicodeDecodeError) as e:
         raise DivError([Problem("file", f"can't read {filepath}: {e}", FORMAT)]) from None
+    return parse_json(text)
+
+
+def parse_json(text: str):
+    """Parse the text of a .div file (what read_json does with a file's
+    contents; a caller that has the text and no file uses this). Raises
+    DivError when it is not JSON. The data is not validated here."""
     try:
         return json.loads(text)
     except json.JSONDecodeError as e:
@@ -299,6 +306,12 @@ def _dumps(x, depth=0) -> str:
 class _Encoder(json.JSONEncoder):
     def iterencode(self, o, _one_shot=False):
         yield _dumps(o)
+
+
+def to_text(data) -> str:
+    """The text write_json puts in a file, as a string (for a caller that
+    returns the file's contents instead of writing a file)."""
+    return json.dumps(data, cls=_Encoder) + "\n"
 
 
 def write_json(filepath: str, data) -> None:

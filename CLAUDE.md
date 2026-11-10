@@ -7,7 +7,7 @@ A design lives in a `.div` file (format 2.0, `docs/div_v2_format.md`). A Claude 
 
 When writing or modifying code for this project, you must adhere strictly to the architectural rules and mathematical models defined in this document. What the screen shows (labels, messages, colours, layout) is described in `README.md`.
 
-**Repository files.** `docs/project_guide.md` says what the app does, what the planned skill will do, and the workflow from requirements to an approved design. `docs/bzb984_fig7_typical.json` and `docs/bat54cv_fig1_fig2_typical.json` are readings of data-sheet graphs, which the tables of the two example files come from. The tests read `bzb984_fig7_typical.json` (`test_clamp_solver.py`), so don't move or delete these files.
+**Repository files.** `docs/project_guide.md` says what the app does, what the planned skill will do, and the workflow from requirements to an approved design. `docs/bzb984_fig7_typical.json` and `docs/bat54cv_fig1_fig2_typical.json` are readings of data-sheet graphs, which the tables of the two example files come from. The tests read `bzb984_fig7_typical.json` (`test_clamp_solver.py`), so don't move or delete these files. `skill/` holds the MCP server (`skill/server.py`), and later the skill's `SKILL.md`.
 
 ## 2. Architecture & State Management
 This project uses a strict Controller/Model/View decoupled architecture.
@@ -16,6 +16,7 @@ This project uses a strict Controller/Model/View decoupled architecture.
 * **`src/core/app_state.py`**: The central controller. Owns the text of every field and table cell, builds the design dict, calls `solve()`, sweeps the solver for the plot, handles file I/O and dirty-tracking.
 * **`src/ui/`**: CustomTkinter views. **NO math calculations.** Views capture input, send it to `AppState`, and display the solver's results.
 * **`divcheck.py`**: Command-line checker. Must not import customtkinter, matplotlib or numpy.
+* **`skill/server.py`**: The MCP server: a gateway from a Claude chat to the solver, with **no math of its own**. Its tools (`solver_info`, `solve_div`, `plot_div`) are read-only and take the text of a `.div`, never a file path. It reuses divcheck's path (`parse_json`, `validate()`, `solve()`, `with_results`, `to_text`, `divcheck.summary`), so it returns what `divcheck.py` prints and writes for the same file; the plot is `AppState`'s sweep, drawn headless by `skill/plot_png.py`. Must not import customtkinter, directly or through another module (matplotlib for the PNG only). The part-agnostic test reads `skill/` too.
 * **Rule: one solver.** Never embed calculation logic inside a UI button click or input callback. Always route through `AppState`, which calls `solve()`. Do not add a second calculation path.
 * **Rule: one set of input rules.** Range and table rules live in `clamp_solver.py` (`NUMBER_RULES`, `CROSS_RULES`, `table_problems`, `wiring_problems`). The file validator and `AppState` use them; do not copy them.
 * **Rule: no hidden defaults.** The UI forwards the raw text of every field to `AppState`, which parses it. A blank field stays blank, and nothing substitutes a value the user can't see (no `.get(key, default)`, no dataclass defaults, no fallback numbers). Blank or unreadable text becomes `None`; every result that depends on it shows "needs input" (or is cleared, with the reason shown), and everything that doesn't depend on it still computes. The only values the app fills in by itself are visible ones, both in `constants.py`: the Signal Bandwidth starting values (`BANDWIDTH_STARTING_VALUES`, each with a source note) and the unit selectors of a new design (`NEW_DESIGN_UNITS`: kΩ, kΩ, Ω). Every clamp diode and MCU value comes from the `.div` file or from the user typing it. R_s blank or 0 means no series resistor: nothing else is asked for it and it has no power check.
@@ -115,7 +116,7 @@ After ANY code change, run the test suite before committing:
 python -m pytest tests/ -v
 ```
 
-All 821 tests must pass. The UI tests carry the pytest marker `ui` (registered in `pytest.ini`); they need a desktop session and take a little over three minutes. While working, `python -m pytest tests/ -m "not ui"` runs the others in about 35 seconds. Run the whole suite before committing.
+All 880 tests must pass. The UI tests carry the pytest marker `ui` (registered in `pytest.ini`); they need a desktop session and take a little over three minutes. While working, `python -m pytest tests/ -m "not ui"` runs the others in about 35 seconds. Run the whole suite before committing.
 
 The non-UI tests still need the packages in `requirements.txt` installed: pytest imports `tests/test_ui.py` to collect it even when its tests are deselected, and one non-UI test (`test_plot_is_not_numpy` in `test_app_state.py`) imports the plot module. Only the UI tests also need a desktop session.
 
@@ -126,6 +127,7 @@ What each file covers:
 * `test_frequency.py`: the time constant, the two edge times, the two frequency limits.
 * `test_div_format.py`: the file format: the two example files and their stored results, every format and value problem, atomic write.
 * `test_divcheck.py`: the checker: summary, output files, the same `results` as the app's Save, exit codes, no GUI packages.
+* `test_mcp_server.py`: the MCP server: the same results, file text, summary and problems as `divcheck.py`, `solver_info`, the PNG and its curves against `AppState`'s sweep, no customtkinter, a client round trip in process, over stdio and over HTTP.
 * `test_file_io.py`: save and load round trip, other files refused, dirty tracking.
 * `test_app_state.py`: `AppState`: parsing, "needs input", range checks, the table states, loading and saving, open + save, "checked", the plot sweep.
 * `test_ui.py`: drives the real, withdrawn window through its widgets: every input, panel and tab, the tooltips, the plot. Three layout tests show the window at 1400×900 and are skipped on a screen it does not fit.

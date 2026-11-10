@@ -3,3 +3,6 @@ matplotlib
 numpy
 pillow
 pytest
+# The MCP server (skill/server.py) and its tests. Tested with 1.26.0.
+# Below 2: mcp 2.x has no FastMCP (renamed MCPServer) and the server does not start on it.
+mcp>=1.26.0,<2
