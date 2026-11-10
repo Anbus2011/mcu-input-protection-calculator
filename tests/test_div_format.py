@@ -123,7 +123,8 @@ class TestStructure:
         assert "ptot_mw" in s["clamp_diode"] and "c_stray_pf" in s["bandwidth"]
 
     def test_injection_limit_key_is_gone(self):
-        """Removed with the injection estimate (owner, 2026-11-09)."""
+        """There is no injection-limit key: it is not in the schema, a file
+        that has it gets a format problem, and the examples don't have it."""
         assert "safe_injection_ma" not in div_format.SCHEMA["mcu"]
         d = zener_reference()
         d["mcu"]["safe_injection_ma"] = 1.0

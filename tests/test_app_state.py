@@ -70,7 +70,7 @@ def test_app_state_calls_the_one_solver():
 
 class TestFrequencyInputs:
     def test_tau_resistance_is_parallel_of_maximums_plus_rs_max(self):
-        """Rewritten: tau now uses R1 max, R2 max and R_s max."""
+        """tau uses R1 max, R2 max and R_s max."""
         s = app_state(schottky_rail())
         r_par = 10100 * 18180 / 28280
         assert s.details["tau_ns"] == pytest.approx(r_par * 18 * 1e-3)
@@ -121,13 +121,14 @@ class TestBandwidthStartingValues:
             assert s.fields[f"bw.{name}"] == str(v)
 
     def test_margin_factor_starting_value(self):
-        """Rewritten (was: C_diode starting value). The diode capacitance and
-        the pin capacitance are part data now, not starting values. The margin
-        factor starts at 1.5: owner's example, 1 MHz reliable, 1.5 MHz may work."""
+        """The starting values are C_stray and the margin factor. The diode
+        capacitance and the pin capacitance are part data, not starting
+        values. The margin factor starts at 1.5: 1.5 MHz "may work" gives
+        1 MHz "reliable"."""
         assert BANDWIDTH_STARTING_VALUES == {"c_stray_pf": 3, "margin_factor": 1.5}
         assert BANDWIDTH_KEYS == ["bw.c_stray_pf", "bw.margin_factor"]
         src = inspect.getsource(constants)
-        assert "# owner's example, 2026-11-09: 1 MHz reliable, 1.5 MHz may work\n" \
+        assert "# 1.5 MHz \"may work\" gives 1 MHz \"reliable\"\n" \
                "    \"margin_factor\": 1.5," in src
         s = AppState()
         assert s.fields["diode.capacitance_pf"] == "" and s.fields["mcu.c_pin_pf"] == ""
@@ -146,8 +147,8 @@ class TestBandwidthStartingValues:
         assert s2.fields["bw.margin_factor"] == "2"
 
     def test_blank_bandwidth_values_load_blank(self, tmp_path):
-        """Rewritten: a file must have the bandwidth section; null values in
-        it load blank (the starting values are not put back by themselves)."""
+        """A file must have the bandwidth section; null values in it load
+        blank (the starting values are not put back by themselves)."""
         s = AppState()
         data = zener_reference(bandwidth__c_stray_pf=None, bandwidth__margin_factor=None)
         warnings = s.open_file(write_json(tmp_path, data))
@@ -235,9 +236,8 @@ class TestNoHiddenDefaults:
         assert s.report.needs == ["VDD/VDDA"]
 
     def test_labels_and_notes_block_nothing(self):
-        """Rewritten (was: blank ZZK blocks nothing). The part names, the
-        type, the pin type, sources, notes and the "checked" boxes are not
-        used by any result."""
+        """The part names, the type, the pin type, sources, notes and the
+        "checked" boxes are not used by any result."""
         s = ref_state()
         before = copy.deepcopy(s.results)
         s.set_fields({"diode.part": "", "diode.type": "", "diode.source": "",
@@ -247,7 +247,7 @@ class TestNoHiddenDefaults:
         assert s.results == before
 
     def test_blank_minimum_cell_needed_only_for_worst_case(self):
-        """Rewritten (was: blank VZ min needed only for worst-case power)."""
+        """A blank cell in the minimum column blocks the worst case only."""
         s = ref_state()
         s.set_cell("reverse", 3, "v_min", "")
         assert s.report.needs == ["Reverse table row 4 V min"]
@@ -267,9 +267,8 @@ class TestNoHiddenDefaults:
         assert div_format.validate(data) == []
 
     def test_no_presets(self):
-        """Rewritten (was: the preset tests). Every diode and MCU value comes
-        from the file or from the user: there is no preset table, drop-down
-        or preset tracking."""
+        """Every diode and MCU value comes from the file or from the user:
+        there is no preset table, drop-down or preset tracking."""
         assert not hasattr(constants, "ZENER_PRESETS")
         assert not hasattr(constants, "CUSTOM_PRESET")
         for name in ("select_zener_preset", "zener_preset_display", "zener_preset_base"):
@@ -308,7 +307,7 @@ class TestRangeChecks:
         assert s.details["v_pin_typ"] is not None
 
     def test_row_order_min_typ_max(self):
-        """Rewritten (was: VZ min <= VZ nom <= VZ max)."""
+        """In a table row, v_min ≤ v_typ ≤ v_max."""
         s = ref_state()
         s.set_cell("reverse", 11, "v_min", "3.4")      # above V typ 3.28
         assert any("Reverse table row 12 V min" in p and "v_min ≤ v_typ ≤ v_max" in p
@@ -316,7 +315,7 @@ class TestRangeChecks:
         assert s.details["v_pin_typ"] is None and s.details["v_pin_high"] is None
 
     def test_currents_ascend(self):
-        """Rewritten (was: IZK must be below IZT)."""
+        """Table currents ascend from row to row."""
         s = ref_state()
         s.set_cell("reverse", 11, "i_ma", "2")          # = the row above
         assert any(p.startswith("Reverse table row 12 current:") and "row above" in p
@@ -367,8 +366,7 @@ class TestSeriesResistorRules:
         assert s.check("power_rs")["status"] == PASS
 
     def test_rs_power_uses_rs_low_tolerance(self):
-        """Rewritten (owner, 2026-11-09; was: injection uses R_s min). Pin
-        held at 0 V: P = V_node,max^2 / R_s,min, with no 100 ohm."""
+        """Pin held at 0 V: P = V_node,max^2 / R_s,min, with no 100 ohm."""
         s = ref_state()
         s.set_fields({"rs.value": "1", "rs.unit": KOHM, "rs.rating": "250", "rs.tol": "5"})
         d = s.details
@@ -479,8 +477,8 @@ class TestLoading:
         assert "R1 value" in warnings[0]
 
     def test_one_warning_lists_all_blank_values_that_are_needed(self, tmp_path):
-        """Rewritten: null values load blank and one warning lists those the
-        results need. (Keys left out are format problems: next test.)"""
+        """Null values load blank and one warning lists those the results
+        need. (Keys left out are format problems: next test.)"""
         data = zener_reference(mcu__vdd=None, mcu__vih_factor=None,
                                system__v_input_max=None, system__v_logic_low_max=None)
         data["clamp_diode"]["reverse"][2]["v_typ"] = None
@@ -569,8 +567,8 @@ class TestLoading:
         assert s.circuit.v["resistors.r2"] == pytest.approx(1.5e6)
 
     def test_format_1_file_is_refused(self, tmp_path):
-        """Rewritten (was: results.div still loads). No converter: one clear
-        message, and the design on screen is untouched."""
+        """No converter: one clear message, and the design on screen is
+        untouched."""
         s = ref_state()
         fields_before = dict(s.fields)
         with pytest.raises(LoadError) as exc:

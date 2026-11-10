@@ -60,9 +60,9 @@ class TestReferenceNumbers:
         (results_design(30), 3.106, 2.926, 3.326),
     ])
     def test_table(self, design, typ, low, high):
-        """The reference table of docs/session2_prompt.md, reset on 2026-11-09
-        for minimum = typical - 0.18 V and maximum = typical + 0.22 V (it was
-        typical -/+ 0.2 V: lowest and highest were 14 to 20 mV lower)."""
+        """The reference table (CLAUDE.md, Verification Baseline), with
+        minimum = typical - 0.18 V and maximum = typical + 0.22 V in every
+        row."""
         row = solve(design)["voltages"]["levels"]["max_input"]
         assert row["typ"] == pytest.approx(typ, abs=0.001)
         assert row["low"] == pytest.approx(low, abs=0.001)
@@ -148,13 +148,13 @@ class TestReferenceNumbers:
 
 class TestSchottkyToRail:
     def test_hand_check_maximum_column(self):
-        """VDD 3.3 V, 10 kΩ / 18 kΩ, 30 V in, maximum column: about 2.44 mA,
+        """VDD 3.3 V, 10 kΩ / 18 kΩ, 30 V in, maximum column: about 2.43 mA,
         about 0.35 V across the diode, about 3.65 V at the pin."""
         d = solve(schottky_rail())["details"]
         v = d["v_pin_diode_max"]
         amps = (30 - v) / 10000 - v / 18000
         assert v == pytest.approx(3.65, abs=0.01)
-        assert amps * 1000 == pytest.approx(2.44, abs=0.01)
+        assert amps * 1000 == pytest.approx(2.432, abs=0.001)
         assert v - 3.3 == pytest.approx(0.35, abs=0.01)
         forward = schottky_rail()["clamp_diode"]["forward"]
         assert v - 3.3 == pytest.approx(table_voltage(forward, "v_max", amps), abs=2e-6)
@@ -615,7 +615,7 @@ class TestSeriesResistor:
         assert "resistors.r_series.value" in r["needs_input"]
 
 
-# ── Check 1: highest input and the injection estimate ────────────────────────
+# ── Check 1: highest input against Safe Max and Absolute Max ─────────────────
 
 def hot(**overrides):
     """Rail Schottky with a 1 kΩ R1: the pin goes well above VDD + 0.3 V."""
@@ -646,9 +646,8 @@ class TestHighestInput:
         assert statuses(-0.01, -0.01) == (FAIL, FAIL)
 
     def test_no_injection_estimate(self):
-        """Removed (owner, 2026-11-09): the estimate divided by an assumed
-        100 Ω that no data sheet gives. There is no injection check, no
-        injection result and no injection-limit input."""
+        """There is no injection check, no injection result, no
+        injection-limit input and no assumed 100 Ω."""
         r = solve(hot())
         assert "injection" not in [c["id"] for c in r["checks"]]
         assert not [k for k in r["details"] if "inj" in k]
@@ -865,8 +864,7 @@ class TestAnalog:
         assert check(r, "analog_error")["status"] == FAIL
 
     def test_range_against_vdd(self):
-        """PASS up to VDD, FAIL above it (owner, 2026-11-09: no TIGHT band up
-        to Safe Max)."""
+        """PASS up to VDD, FAIL above it: there is no TIGHT band."""
         r = solve(zener_reference())
         row = r["voltages"]["levels"]["analog_fullscale"]
         assert check(r, "analog_range") == {"id": "analog_range", "status": PASS,

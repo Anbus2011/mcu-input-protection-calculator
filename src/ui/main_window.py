@@ -280,7 +280,7 @@ class MainWindow(ctk.CTk):
         tab_bw = self.tabs.add("Signal Bandwidth")
 
         # The two long tabs scroll, so that the plot under them keeps its
-        # height (about 360 px in a 1400x900 window).
+        # height (at least 350 px in a 1400x900 window).
         self.components_scroll = ctk.CTkScrollableFrame(
             tab_comp, fg_color="transparent", height=TAB_SCROLL_HEIGHT)
         self.components_scroll.pack(fill="both", expand=True)

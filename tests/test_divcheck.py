@@ -71,8 +71,8 @@ class TestSummary:
         assert divcheck.main([write(tmp_path, blank_design())]) == 0
         out = capsys.readouterr().out
         assert "VERDICT: needs input" in out
-        # Rewritten: both tables are null (not filled in), which is not the
-        # same as [] (not modelled). Was: "No forward data" / "No reverse data".
+        # Both tables are null (not filled in), which is not the same as []
+        # (not modelled: "No forward data" / "No reverse data").
         assert "  Forward table not filled in: needs input\n" in out
         assert "  Reverse table not filled in: needs input\n" in out
         assert "No forward data" not in out and "No reverse data" not in out

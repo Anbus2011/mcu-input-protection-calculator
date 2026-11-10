@@ -229,9 +229,8 @@ class SafetyTab:
             "Component Analysis tab.\n"
             "At Min Input: V_mcuL, the lowest pin voltage over the same corners.",
             "The MCU voltage threshold being compared against.\n"
-            "Safe Max = recommended operating limit. It is the guard against\n"
-            "current into the pin's protection diodes: there is no separate\n"
-            "injection-current estimate.\n"
+            "Safe Max = highest pin voltage in normal operation. Its check is\n"
+            "the guard against current into the pin's protection structures.\n"
             "Abs Max = damage threshold from datasheet.\n"
             "Pin Min = lowest allowed pin voltage.",
             "How much headroom remains to the limit.\nPositive = safe, negative = exceeded.",

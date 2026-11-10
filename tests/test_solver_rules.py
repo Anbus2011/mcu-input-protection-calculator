@@ -2,11 +2,13 @@
 Solver-level tests of the rules fixed on the bug-fix branch (ported from
 the tests of the old circuit_model.py / bandwidth_model.py): one solver,
 bisection, no results from missing inputs, no hidden defaults, thresholds,
-worst-case power and the power verdict.
+worst-case power and the power verdict; and the part-agnostic rule: the app
+names no part, vendor or data sheet.
 Run with: python -m pytest tests/ -v
 """
 import inspect
 import math
+import os
 import re
 
 import pytest
@@ -145,9 +147,8 @@ class TestSolverSettling:
         assert r["warnings"] and "did not settle" in r["warnings"][0]
 
     def test_no_step_where_the_0_5_ma_rule_stepped(self):
-        """Rewritten: the old model sat at 3.300 V just below 9.753 V in and
-        dropped 0.2 V to its knee just above (the 0.5 mA rule). The table
-        model has no such step: 2 mV of input moves the pin by 0.1 mV."""
+        """The curve has no step at 9.753 V in, where the removed 0.5 mA rule
+        stepped by 0.2 V: 2 mV of input moves the pin by 0.1 mV."""
         design = reference()
         below = pin_voltage(design, 9.752, "typ")
         above = pin_voltage(design, 9.754, "typ")
@@ -186,8 +187,8 @@ class TestNoStaleOrFakeResults:
 
 class TestNoHiddenDefaults:
     def test_solver_has_no_fallback_values(self):
-        """Rewritten (was: parameter dataclasses default to None). The solver
-        takes a dict; it never reads a key with a fallback value."""
+        """The solver takes a dict; it never reads a key with a fallback
+        value."""
         src = inspect.getsource(clamp_solver)
         assert "dataclass" not in src
         assert not re.findall(r"\.get\([^()]*,", src)
@@ -248,7 +249,7 @@ class TestAdcAndThresholds:
         assert min(corners) == c.node(3.8, 10000 * 1.01, 18000 * 0.99, "min")
 
 
-# ── Frequency limits (rewritten: was the four-limit bandwidth model) ─────────
+# ── Frequency limits ─────────────────────────────────────────────────────────
 
 class TestFrequencyRules:
     def test_pin_never_reads_high_blocks_limits_no_fallback(self):
@@ -279,7 +280,7 @@ class TestFrequencyRules:
         assert r["details"]["t_rise_ns"] == pytest.approx(expected)
 
 
-# ── No injection estimate (owner, 2026-11-09) ────────────────────────────────
+# ── No injection estimate ────────────────────────────────────────────────────
 
 class TestNoInjectionEstimate:
     def test_safe_max_is_the_guard(self):
@@ -292,6 +293,45 @@ class TestNoInjectionEstimate:
         assert check(r, "pin_max_safe")["status"] == FAIL
         src = inspect.getsource(clamp_solver)
         assert "ESD" not in src and "safe_injection" not in src and "+ 100" not in src
+
+
+# ── Part-agnostic: the app names no part, vendor or data sheet ───────────────
+
+# What must not appear, in upper or lower case, in any .py file under src/,
+# in divcheck.py or in main.py (CLAUDE.md §2, "part-agnostic"). Part names
+# and data-sheet values belong in examples/, docs/ and tests/. Each entry is
+# a regular expression; add more here.
+PART_SPECIFIC_PATTERNS = [
+    r"STM32",
+    r"DS12983",
+    r"BZB984",
+    r"BAT54",
+    r"Nexperia",
+    r"Table\s*\d+",        # a data-sheet table reference, such as "Table 54"
+]
+
+
+class TestPartAgnostic:
+    def test_app_names_no_part_vendor_or_data_sheet(self):
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        paths = [os.path.join(folder, name)
+                 for folder, _, names in os.walk(os.path.join(root, "src"))
+                 for name in names if name.endswith(".py")]
+        paths += [os.path.join(root, "divcheck.py"), os.path.join(root, "main.py")]
+        # the files that hold the solver, the rules and every label and tooltip
+        assert {"clamp_solver.py", "div_format.py", "app_state.py", "constants.py",
+                "input_panels.py", "output_panels.py", "main_window.py",
+                "plot_canvas.py", "divcheck.py", "main.py"} <= {
+                    os.path.basename(p) for p in paths}
+        found = []
+        for path in sorted(paths):
+            with open(path, encoding="utf-8") as f:
+                for number, line in enumerate(f, 1):
+                    for pattern in PART_SPECIFIC_PATTERNS:
+                        if re.search(pattern, line, re.IGNORECASE):
+                            found.append(f"{os.path.relpath(path, root)}:{number}: "
+                                         f"{pattern} in {line.strip()!r}")
+        assert not found, "\n".join(found)
 
 
 # ── Typical and worst-case power ─────────────────────────────────────────────
@@ -329,15 +369,15 @@ class TestWorstCasePower:
         assert d["worst_power_corner"]["r1"] == "R1 min, R2 min, diode min"
 
     def test_hand_checked_rs_worst(self):
-        """Rewritten (owner, 2026-11-09): R_s 1 k at 5 %, pin held at 0 V:
+        """R_s 1 k at 5 %, pin held at 0 V:
         P = V_node,max^2 / R_s,min = V^2 / 950 ohm."""
         d = solve(reference(**self.HOT, resistors__r_series=rs(1)))["details"]
         assert d["p_rs_worst_mw"] == pytest.approx(d["v_pin_high"] ** 2 / 950 * 1000)
         assert d["p_rs_mw"] == pytest.approx(d["v_pin_typ"] ** 2 / 1000 * 1000)
 
     def test_blank_minimum_column_blocks_only_worst_case(self):
-        """Rewritten (was: VZ min blocks only the worst-case power). A blank
-        cell in the minimum column blocks the corners, not the typical."""
+        """A blank cell in the minimum column blocks the corners, not the
+        typical."""
         design = reference()
         design["clamp_diode"]["reverse"][4]["v_min"] = None
         r = solve(design)

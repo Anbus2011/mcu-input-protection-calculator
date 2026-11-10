@@ -81,9 +81,9 @@ Leakage curves are nearly flat, so the three columns of a reverse table can be f
 | Key | Value |
 |---|---|
 | `part`, `source`, `checked`, `note` | as for the diode |
-| `pin_type` | a label such as `"TT"` or `"FT"` |
+| `pin_type` | a label for the kind of pin, for example `"5 V tolerant"` |
 | `vdd` | supply voltage, V. Also the ADC reference and the voltage of the `vdd` rail the diode may connect to |
-| `v_recommended_max` | "Safe Max": highest pin voltage in normal operation, V. The `pin_max_safe` check against it is the guard against injection into the pin's protection diodes (on an STM32G4 TT pin, VDD + 0.3 V) |
+| `v_recommended_max` | "Safe Max": highest pin voltage in normal operation, V. The `pin_max_safe` check against it is the guard against current into the pin's protection structures |
 | `v_absolute_max` | absolute maximum pin voltage, V |
 | `v_pin_min` | lowest allowed pin voltage, V (0 or negative, for example -0.3) |
 | `adc_bits` | ADC resolution, whole number 1 to 32 |
