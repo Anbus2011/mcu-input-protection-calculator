@@ -24,7 +24,7 @@ What this project is for, what the planned Claude skill will do, and the workflo
 - `python divcheck.py in.div [out.div] [--json out.json]` gives the same results from the command line, with a plain Python install.
 - The app, `divcheck.py` and the skill all use the one solver, `src/models/clamp_solver.py`. The app is a way to review the solver's results, not an independent check of its math. The example files, the tests and hand calculations are the safety net.
 
-## 2. What the skill will be
+## 2. What the skill is
 
 `skill/SKILL.md` is written and not yet tested live in a Claude chat. It is a Claude skill that designs the protection network for one input and writes its `.div`.
 
@@ -49,10 +49,12 @@ What this project is for, what the planned Claude skill will do, and the workflo
 - The solver does all the math, through the server. Chat never retypes a number: tables are shown as `solve_div` returned them and plots as `plot_div` drew them.
 - Nothing is guessed. A value the skill can't source is written as `null` and shows as "needs input".
 - Every data-sheet value is cited in `source` and `note` (document number, revision, table or figure), and the section is written with `checked: false`.
-- Before designing, the skill solves both example files through `solve_div` and stops if the results differ from their stored results. It uses its own copies in `skill/examples/`; a test fails if they differ from `examples/`.
+- Before designing, the skill solves both example files through `solve_div` and stops if the results differ from their stored results. It uses its own copies in `skill/examples/`; a test fails if they differ from `examples/`. It compares the results with code when code execution is available, not by eye. If it can't read its `examples/` folder, it stops and says so.
 - The skill has its own version number and states the `SOLVER_VERSION` it was written and tested for. If the server reports a different `SOLVER_VERSION`, the skill stops and says the skill may need updating. Every `.div` carries `SOLVER_VERSION` in its `results`, and the skill writes its own version, the solver version and the server's commit in the file's `notes` and in its report (format 2.0 has no key for them).
 - When `solver_info` reports `dirty: true`, the skill continues. It writes "server dirty: true" with the commit in the file's `notes`, and flags it at the top of its report.
-- A check the solver doesn't make (for example resistor derating at temperature, or the board's minimum rail load) is reported as done by the skill or as not checked, never as PASS.
+- When `solver_info` reports `commit` or `dirty` as `null`, the skill continues. It writes the null with its reason (`commit_reason` or `dirty_reason`) in the file's `notes` and at the top of its report, as for dirty.
+- The skill changes R1 and R2 until every check is PASS. A TIGHT check is not the end while a PASS is reachable; when a PASS is not reachable, the skill reports the TIGHT check as a choice for the user. After about five solves without progress it stops and reports which check can't pass and the options.
+- A check the solver doesn't make (for example resistor derating at temperature, or the board's minimum rail load) is reported as done by the skill or as not checked, never as PASS. A check the skill makes shows its arithmetic in the report: which `solve_div` value, which rating or limit, the result.
 - `rating_mw` in the `.div` is the data-sheet rating as stated. Derating to the check temperature is the skill's own check, in its report.
 
 ## 3. The workflow
