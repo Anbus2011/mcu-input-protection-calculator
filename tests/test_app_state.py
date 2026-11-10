@@ -1203,6 +1203,62 @@ class TestPlot:
         assert any("did not settle at" in w and "plot point" in w for w in s.report.warnings)
         assert any("Max Input 30 V" in w for w in s.report.warnings)
 
+    @staticmethod
+    def plot_warnings(s):
+        return [w for w in s.report.warnings if "plot point" in w]
+
+    def test_unsettled_warning_counts_plot_points_when_every_solve_fails(self, monkeypatch):
+        """The warning counts plot points, not solves: with every solve
+        failing (9 per point: the typical and the eight corners) a 200-point
+        plot reports 200."""
+        from src.models import clamp_solver
+        real = clamp_solver._solve_node
+        monkeypatch.setattr(clamp_solver, "_solve_node",
+                            lambda *a, **k: (real(*a, **k)[0], False))
+        s = ref_state()
+        assert len(s.plot_data["v_in"]) == 200
+        assert len(s.circuit.unsettled) == 200 * 9          # every solve failed
+        assert s.plot_unsettled_points == 200
+        assert self.plot_warnings(s) == [
+            "Clamp diode solver did not settle at 200 plot point(s). "
+            "The curve is not reliable there."]
+        # one curve only (the corners wait for R1 tolerance): still 200 points
+        s.set_field("r1.tol", "")
+        assert "v_mcu_low" not in s.plot_data and len(s.circuit.unsettled) == 200
+        assert self.plot_warnings(s)[0].startswith(
+            "Clamp diode solver did not settle at 200 plot point(s).")
+
+    def test_unsettled_warning_counts_each_failed_point_once(self, monkeypatch):
+        """Failures at exactly 3 plot points give 3, however many of a
+        point's solves failed: all nine at the first, the four R1-min
+        corners at the second, the typical solve alone at the third."""
+        from src.models import clamp_solver
+        grid = ref_state().plot_data["v_in"]
+        all_nine, r1_min_corners, typical_only = grid[10], grid[100], grid[150]
+        real = clamp_solver._solve_node
+
+        def solve_node(vin, r1, r2, *rest):
+            volts, settled = real(vin, r1, r2, *rest)
+            if (vin == all_nine or (vin == r1_min_corners and r1 < 10000)
+                    or (vin == typical_only and (r1, r2) == (10000, 18000))):
+                settled = False
+            return volts, settled
+
+        monkeypatch.setattr(clamp_solver, "_solve_node", solve_node)
+        s = ref_state()
+        assert s.plot_data["v_in"] == grid and len(grid) == 200
+        assert len(s.circuit.unsettled) == 9 + 4 + 1        # failed solves
+        assert s.plot_unsettled_points == 3                 # failed points
+        assert self.plot_warnings(s) == [
+            "Clamp diode solver did not settle at 3 plot point(s). "
+            "The curve is not reliable there."]
+        # none of the three is an input level: the solver's own results settled
+        assert s.report.warnings == self.plot_warnings(s)
+
+    def test_no_unsettled_warning_when_every_solve_settles(self):
+        s = ref_state()
+        assert s.plot_unsettled_points == 0 and self.plot_warnings(s) == []
+
 
 def test_worst_status_of_several_checks():
     """The Max Input row of the Input Levels tab is judged on Safe Max and

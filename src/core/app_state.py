@@ -220,6 +220,7 @@ class AppState:
         self.circuit = None          # solver.Circuit of the design, for sweeps
         self.plot_data: dict = {}    # plain lists for the plot ({} = nothing to draw)
         self.plot_message: str = ""
+        self.plot_unsettled_points: int = 0  # plot points with a solve that did not settle
         self.report = InputReport()
         self.recalculate()
 
@@ -622,7 +623,11 @@ class AppState:
         and the highest come from one call to the solver's corners() per
         point (min and max of its eight voltages): the same values as
         pin_voltage(x, "low") and pin_voltage(x, "high"), which would each
-        solve the eight corners again."""
+        solve the eight corners again.
+
+        plot_unsettled_points is the number of plot points with at least
+        one solve (typical or a corner) that did not settle: a point counts
+        once however many of its solves failed."""
         c = self.circuit
         vin_max, vin_min = c.v[solver.VIN_MAX], c.v["system.v_input_min"]
         typ_block = c.blocked("typ") + [p for p in c.cause[solver.VIN_MAX]
@@ -630,6 +635,7 @@ class AppState:
         worst_block = c.blocked("worst") + [p for p in c.cause[solver.VIN_MAX]
                                             if p not in c.blocked("worst")]
         self.plot_data = {}
+        self.plot_unsettled_points = 0
         if not typ_block or not worst_block:
             start = float(min(0.0, vin_min)) if vin_min is not None else 0.0
             vin_max = float(vin_max)
@@ -641,14 +647,20 @@ class AppState:
                     "v_abs_max": c.v["mcu.v_absolute_max"],
                     "vil": self.results["voltages"]["vil"],
                     "vih": self.results["voltages"]["vih"]}
-            if not typ_block:
-                data["v_mcu_typ"] = [c.pin_voltage(x, "typ") for x in v_in]
-            if not worst_block:
-                low, high = [], []
-                for x in v_in:
+            typ, low, high = [], [], []
+            for x in v_in:
+                solves_not_settled = len(c.unsettled)
+                if not typ_block:
+                    typ.append(c.pin_voltage(x, "typ"))
+                if not worst_block:
                     volts = [corner["v"] for corner in c.corners(x, "sweep")]
                     low.append(min(volts))
                     high.append(max(volts))
+                if len(c.unsettled) > solves_not_settled:
+                    self.plot_unsettled_points += 1     # once per point
+            if not typ_block:
+                data["v_mcu_typ"] = typ
+            if not worst_block:
                 data["v_mcu_low"], data["v_mcu_worst"] = low, high
             self.plot_data = data
 
@@ -694,7 +706,7 @@ class AppState:
         rep.problems = [f"{path_label(p)}: {self._problems[p]}"
                         for p in sorted(self._problems, key=order)]
         rep.warnings = list(self.results["warnings"])
-        bad_points = len(self.circuit.unsettled)
+        bad_points = self.plot_unsettled_points
         if bad_points:
             rep.warnings.append(
                 f"Clamp diode solver did not settle at {bad_points} plot point(s). "

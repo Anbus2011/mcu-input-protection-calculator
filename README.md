@@ -424,7 +424,7 @@ Everything else about a part (diode tables, capacitance, MCU limits, pin capacit
 python -m pytest tests/ -v
 ```
 
-All 817 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
+All 820 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
 
 ```bash
 python -m pytest tests/ -m "not ui"
