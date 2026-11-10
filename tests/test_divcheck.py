@@ -117,6 +117,52 @@ class TestOutputFiles:
         assert "can't write" in capsys.readouterr().err
 
 
+class TestSameResultsAsTheApp:
+    """The app's Save and divcheck.py write identical "results" sections."""
+
+    RS = dict(value=100, unit="Ω", rating_mw=250, tolerance_pct=5)
+    DESIGNS = {
+        "zener example": lambda: read_json(ZENER),
+        "schottky example": lambda: read_json(SCHOTTKY),
+        "with R_s": lambda: zener_reference(resistors__r_series=TestSameResultsAsTheApp.RS,
+                                            system__v_touch=60, system__f_required_hz=20000,
+                                            system__v_logic_high_min=24),
+    }
+
+    @staticmethod
+    def results_text(path):
+        text = open(path, encoding="utf-8").read()
+        return text[text.index('  "results": {'):]
+
+    @pytest.mark.parametrize("name", list(DESIGNS))
+    def test_save_and_divcheck_write_identical_results(self, name, tmp_path, capsys):
+        from src.core.app_state import AppState
+        source = write(tmp_path, self.DESIGNS[name](), "source.div")
+        by_app, by_checker = str(tmp_path / "app.div"), str(tmp_path / "checker.div")
+
+        s = AppState()
+        assert s.open_file(source) == []
+        assert s.save_to_file(by_app)
+        assert divcheck.main([source, by_checker]) == 0
+
+        # the same text, character for character, and so the same values
+        assert self.results_text(by_app) == self.results_text(by_checker)
+        assert read_json(by_app)["results"] == read_json(by_checker)["results"]
+        checks = {c["id"]: c for c in read_json(by_app)["results"]["checks"]}
+        assert ("power_rs" in checks) == (name == "with R_s")
+        if name == "with R_s":
+            assert checks["power_rs"]["limit"] == 250 and checks["power_rs"]["status"] == "PASS"
+
+    @pytest.mark.parametrize("path", [ZENER, SCHOTTKY])
+    def test_example_files_hold_what_save_writes(self, path, tmp_path):
+        from src.core.app_state import AppState
+        s = AppState()
+        s.open_file(path)
+        out = str(tmp_path / "saved.div")
+        assert s.save_to_file(out)
+        assert self.results_text(out) == self.results_text(path)
+
+
 class TestInvalidFiles:
     def test_every_problem_is_listed_and_exit_is_1(self, tmp_path, capsys):
         data = zener_reference()

@@ -69,9 +69,9 @@
       {"id": "pin_max_abs", "status": "PASS", "value": 3.239031, "limit": 4.0, "unit": "V"},
       {"id": "logic_high", "status": "FAIL", "value": 1.831184, "limit": 2.31, "unit": "V"},
       {"id": "logic_low", "status": "PASS", "value": 0.647364, "limit": 0.99, "unit": "V"},
-      {"id": "power_r1", "status": "PASS", "value": 74.46949, "limit": 200, "unit": "mW"},
-      {"id": "power_r2", "status": "PASS", "value": 0.588545, "limit": 100, "unit": "mW"},
-      {"id": "power_diode", "status": "PASS", "value": 8.178435, "limit": 265, "unit": "mW"},
+      {"id": "power_r1", "status": "PASS", "value": 74.46949, "limit": 200.0, "unit": "mW"},
+      {"id": "power_r2", "status": "PASS", "value": 0.588545, "limit": 100.0, "unit": "mW"},
+      {"id": "power_diode", "status": "PASS", "value": 8.178435, "limit": 265.0, "unit": "mW"},
       {"id": "analog_range", "status": "PASS", "value": 2.352128, "limit": 3.3, "unit": "V"},
       {"id": "analog_error", "status": null, "value": -38.27508, "limit": null, "unit": "%"}
     ],
@@ -87,7 +87,7 @@
         "logic_low": {"v_in": 1.0, "typ": 0.6425773, "low": 0.6374079, "high": 0.647364},
         "logic_high": {"v_in": 3.8, "typ": 1.96266, "low": 1.831184, "high": 2.110306},
         "analog_fullscale": {"v_in": 5.1, "typ": 2.171218, "low": 2.01905, "high": 2.352128},
-        "max_input": {"v_in": 30, "typ": 3.019829, "low": 2.839758, "high": 3.239031}
+        "max_input": {"v_in": 30.0, "typ": 3.019829, "low": 2.839758, "high": 3.239031}
       }
     },
     "needs_input": [],

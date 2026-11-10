@@ -115,7 +115,7 @@ One pair of logic levels per file: with several signal sources, give the lowest 
 
 ## `results`
 
-Written only by the solver (`divcheck.py` or the app's Save). Numbers are rounded to 7 significant digits.
+Written only by the solver (`divcheck.py` or the app's Save; both write the same `results` for the same design). Numbers are rounded to 7 significant digits and always written with a decimal point (`200.0`).
 
 | Key | Value |
 |---|---|

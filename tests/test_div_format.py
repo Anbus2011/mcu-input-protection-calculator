@@ -319,6 +319,15 @@ class TestStoredResults:
         assert a == pytest.approx(b, abs=1e-6) and a == float(f"{b:.7g}")
         assert stored["voltages"]["vih"] == 2.31
 
+    def test_whole_numbers_are_written_as_decimals(self):
+        """A rating of 200 in a file and 200.0 typed in the app give the same
+        text, so the app's Save and divcheck.py write identical results."""
+        stored = results_for_file(solve(zener_reference()))
+        limit = next(c for c in stored["checks"] if c["id"] == "power_r1")["limit"]
+        v_in = stored["voltages"]["levels"]["max_input"]["v_in"]
+        assert (limit, v_in) == (200.0, 30.0) and type(limit) is float and type(v_in) is float
+        assert stored["voltages"]["levels"]["zero"]["v_in"] == 0.0
+
     def test_note_explains_a_missing_limit(self):
         stored = results_for_file(solve(zener_reference()))
         assert len(stored["notes"]) == 1 and "never reads high" in stored["notes"][0]

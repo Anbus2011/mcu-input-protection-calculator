@@ -26,6 +26,9 @@ ZENER_DIV = os.path.join(EXAMPLES, "zener_gnd_bzb984_c3v3.div")
 SCHOTTKY_DIV = os.path.join(EXAMPLES, "schottky_rail_bat54cv.div")
 OHM, KOHM, MOHM = "Ω", "kΩ", "MΩ"
 
+# Deselect with:  python -m pytest tests/ -m "not ui"
+pytestmark = pytest.mark.ui
+
 NUMERIC_KEYS = [k for k, f in FIELDS.items() if f.kind in ("float", "int")]
 BLOCKED, NOT_GIVEN, NO_RS = "n/a (see note)", "--", "no R_s"
 

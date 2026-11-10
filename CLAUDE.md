@@ -112,18 +112,20 @@ After ANY code change, run the test suite before committing:
 python -m pytest tests/ -v
 ```
 
-All 716 tests must pass. The suite covers:
+All 725 tests must pass. The UI tests carry the pytest marker `ui` (registered in `pytest.ini`); they need a desktop session and take about two minutes. While working, `python -m pytest tests/ -m "not ui"` runs the other 539 in about 15 seconds. Run the whole suite before committing.
+
+The suite covers:
 * **Solver** (`test_clamp_solver.py`, 190 tests): reference numbers, the Schottky-to-rail hand check, the three wirings (plus the fourth), pin voltage never falls as the input rises, `type` is only a label, diode tables (interpolation, extension, rules), bisection to 1 nV, "did not settle", "needs input" with the rest still computed, R_s rules, every check and its thresholds, information rows, the overall verdict, standard library only
 * **Solver rules** (`test_solver_rules.py`, 44 tests): reference case, one solver for results / levels / plot, bisection, no results from missing inputs, no fallback values, zero ratings, ADC bits, VIL/VIH factors, frequency rules, no injection estimate, worst-case power and hand-checked corners, blank rating, power verdict
 * **Design calculation** (`test_design_calculation.py`, 32 tests): diode table model, full baseline calculation, Kirchhoff's current law, power sums, tolerance ratios, input levels, the 8.2 kΩ / 29 kΩ design, edge cases
 * **Frequency** (`test_frequency.py`, 11 tests): time constant, the two edge formulas, the two limits, edge cases
-* **File format** (`test_div_format.py`, 72 tests): the two example files (valid, inputs, stored results), structure, every problem reported, format and value problems, null is blank, stored results, atomic write, written text
-* **Checker** (`test_divcheck.py`, 21 tests): summary, output files, invalid files, exit codes, runs without customtkinter / matplotlib / numpy
+* **File format** (`test_div_format.py`, 73 tests): the two example files (valid, inputs, stored results), structure, every problem reported, format and value problems, null is blank, stored results (whole numbers written as decimals), atomic write, written text
+* **Checker** (`test_divcheck.py`, 26 tests): summary, output files, the app's Save and the checker write identical `results` (both examples and a design with R_s), invalid files, exit codes, runs without customtkinter / matplotlib / numpy
 * **File I/O** (`test_file_io.py`, 9 tests): save/load round-trip, format version, example file, format 1.0 refused, blank values, dirty tracking
-* **AppState** (`test_app_state.py`, 151 tests): frequency inputs and starting values, every field marks unsaved, blank design, "needs input", range checks, R_s rules, unreadable text blocks Save, atomic save, loading (every format problem, state untouched on failure, value problems listed to fix, stored results ignored), clamp-diode tables and connection, new MCU and system values, the plot sweep
+* **AppState** (`test_app_state.py`, 154 tests): frequency inputs and starting values, every field marks unsaved, blank design, "needs input", range checks, R_s rules, unreadable text blocks Save, atomic save, loading (every format problem, state untouched on failure, value problems listed to fix, stored results ignored, an empty table saved as `[]`), clamp-diode tables and connection, new MCU and system values, the plot sweep
 * **UI** (`test_ui.py`, 186 tests; needs a desktop session): drives the real, withdrawn window through its widgets: change tracking on every input, blank / 0 / unreadable on every numeric field, New Design clearing everything, save-failure messages, loading, no preset drop-down, "Zener" renamed, the clamp-diode tables (typing, add and delete row, "not modelled" notes), no injection row, power table and verdict, overall verdict line, Input Levels table, Min Input / analog error / information rows, the two-number Signal Bandwidth tab with its Details control
 
-Shared designs for the tests are in `tests/designs.py`.
+Shared designs for the tests are in `tests/designs.py`. `docs/test_changes.md` lists every test of the earlier 401-test suite that was removed or rewritten, with the reason.
 
 If a test fails after your change, fix the issue before committing. Do not skip or delete tests.
 

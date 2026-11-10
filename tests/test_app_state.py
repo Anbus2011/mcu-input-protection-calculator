@@ -578,7 +578,8 @@ class TestLoading:
         assert s.fields == fields_before
         assert not os.path.exists(os.path.join(EXAMPLES, "..", "results.div"))
 
-    @pytest.mark.parametrize("path,verdict", [(ZENER_DIV, FAIL), (SCHOTTKY_DIV, FAIL)])
+    @pytest.mark.parametrize("path,verdict", [(ZENER_DIV, FAIL), (SCHOTTKY_DIV, FAIL)],
+                             ids=["zener", "schottky"])
     def test_example_files_load(self, path, verdict):
         s = AppState()
         assert s.open_file(path) == []
@@ -606,6 +607,25 @@ class TestLoading:
         fix = " ".join(s.report.problems)
         assert "VIL factor must be below VIH factor" in fix
         assert "Reverse table row 6 V typ: must be greater than in the row above" in fix
+
+    @pytest.mark.parametrize("empty", [("forward",), ("reverse",), ("forward", "reverse")],
+                             ids=["forward", "reverse", "both"])
+    def test_empty_table_round_trips_as_empty(self, tmp_path, empty):
+        """Open a file whose table is [], save without editing: still []
+        ("not modelled"), and the other table is untouched."""
+        data = zener_reference(**{f"clamp_diode__{t}": [] for t in empty})
+        s = AppState()
+        assert s.open_file(write_json(tmp_path, data)) == []
+        assert not s.is_dirty
+        for t in empty:
+            assert s.tables[t] == []
+        out = saved(s, tmp_path, "out.div")
+        for t in ("forward", "reverse"):
+            assert out["clamp_diode"][t] == data["clamp_diode"][t]
+        assert out["clamp_diode"]["forward"] == [] and type(out["clamp_diode"]["forward"]) is list
+        text = open(str(tmp_path / "out.div"), encoding="utf-8").read()
+        for t in empty:
+            assert f'    "{t}": []' in text          # written as [], not as rows or null
 
     def test_null_table_loads_as_two_blank_rows(self, tmp_path):
         """null = not filled in yet (results keep asking); [] = not modelled."""

@@ -224,7 +224,13 @@ def number_paths(schema=None, prefix="") -> list:
 # ── Results stored in a file ─────────────────────────────────────────────────
 
 def _rounded(x):
-    if isinstance(x, float):
+    """Numbers as floats rounded to RESULT_DIGITS significant digits. A whole
+    number given in a file (a rating of 200) and the same value typed in the
+    app (200.0) are then written the same way, so the app's Save and the
+    checker produce identical "results"."""
+    if isinstance(x, bool):
+        return x
+    if isinstance(x, (int, float)):
         return float(f"{x:.{RESULT_DIGITS}g}") if math.isfinite(x) else None
     if isinstance(x, dict):
         return {k: _rounded(v) for k, v in x.items()}
