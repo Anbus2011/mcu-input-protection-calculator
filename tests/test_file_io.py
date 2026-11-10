@@ -83,7 +83,8 @@ class TestFileRoundTrip:
 
 
 class TestOtherFiles:
-    """Rewritten: there is no backwards compatibility with format 1.0."""
+    """Files the app did not just save: an example file, a file with blank
+    values, and a format 1.0 file (refused: there is no reader for it)."""
 
     def test_load_example_file(self):
         """Load a shipped example and verify key values."""

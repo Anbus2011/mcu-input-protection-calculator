@@ -187,19 +187,21 @@ Between two rows, ln(current) is taken as linear in voltage; below the first row
 
 #### MCU Pin Input Limits
 
-| Parameter | Description |
-|-----------|-------------|
-| Part, Pin type | Part name and a label for the kind of pin (such as TT or FT) |
-| VDD/VDDA | MCU supply voltage; also the ADC reference (VREF) and the voltage of the rail when the diode is connected to `vdd` |
-| Safe Max | Highest pin voltage in normal operation (STM32G4 TT pins: VDD + 0.3 V). The check against it is the guard against current into the pin's protection diodes |
-| Abs. Max | Absolute maximum (damage threshold) |
-| Pin Min | Lowest allowed pin voltage, 0 or negative (STM32G4: -0.3 V) |
-| ADC bits | ADC resolution N (STM32G4: 12) |
-| VIL factor | Pin input-low threshold as a fraction of VDD (STM32G4: 0.3, DS12983 Rev 5, Table 54) |
-| VIH factor | Pin input-high threshold as a fraction of VDD (STM32G4: 0.7, DS12983 Rev 5, Table 54) |
-| C_pin | Pin capacitance (pF) |
-| Min pulse width | Shortest pulse the input peripheral accepts (ns) |
-| Source, Note, Checked | As for the clamp diode: editing any MCU value unticks "Checked" |
+| Parameter | Description | Usually found in the MCU data sheet under |
+|-----------|-------------|-------------------------------------------|
+| Part, Pin type | Part name and a label for the kind of pin (for example "5 V tolerant") | Pin descriptions |
+| VDD/VDDA | MCU supply voltage; also the ADC reference (VREF) and the voltage of the rail when the diode is connected to `vdd` | Your design's supply, within the operating conditions |
+| Safe Max | Highest pin voltage in normal operation. Its check is the guard against current into the pin's protection structures | Operating conditions (pin input voltage), for the pin type used |
+| Abs. Max | Absolute maximum pin voltage (damage threshold) | Absolute maximum ratings |
+| Pin Min | Lowest allowed pin voltage, 0 or negative | Absolute maximum ratings |
+| ADC bits | ADC resolution N | ADC characteristics |
+| VIL factor | Pin input-low threshold as a fraction of VDD | I/O static characteristics, for the pin type used |
+| VIH factor | Pin input-high threshold as a fraction of VDD | I/O static characteristics, for the pin type used |
+| C_pin | Pin capacitance (pF) | I/O static characteristics |
+| Min pulse width | Shortest pulse the input peripheral accepts (ns) | Timer input characteristics |
+| Source, Note, Checked | As for the clamp diode: editing any MCU value unticks "Checked" | |
+
+The two files in `examples/` each hold a complete worked set of these values, with the data sheet and the tables they came from in `source` and `note`.
 
 #### System Requirements
 
@@ -442,7 +444,7 @@ Everything else about a part (diode tables, capacitance, MCU limits, pin capacit
 python -m pytest tests/ -v
 ```
 
-All 820 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
+All 821 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
 
 ```bash
 python -m pytest tests/ -m "not ui"

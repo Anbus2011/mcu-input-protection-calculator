@@ -39,7 +39,7 @@ class TestRcFilterBasics:
 
 
 class TestEdgeTiming:
-    """Rewritten: the "undefined zone" times became the two edge times."""
+    """The rising and the falling edge time."""
 
     def setup_method(self):
         self.r = solve(design())
@@ -70,17 +70,19 @@ class TestFrequencyLimits:
         self.d = solve(design())["details"]
 
     def test_both_limits_positive(self):
-        """Rewritten: there are two limits now, not four."""
+        """The two limits: "may work up to" and "reliable up to"."""
         assert self.d["f_may_work_hz"] > 0
         assert self.d["f_reliable_hz"] > 0
 
     def test_reliable_not_above_may_work(self):
-        """Rewritten (was: conservative below practical)."""
+        """The "reliable" limit is "may work" divided by the margin factor
+        (1.5)."""
         assert self.d["f_reliable_hz"] < self.d["f_may_work_hz"]
         assert self.d["f_reliable_hz"] == pytest.approx(self.d["f_may_work_hz"] / 1.5)
 
     def test_edge_time_is_the_larger_of_the_two(self):
-        """Rewritten (was: effective limit = minimum of four limits)."""
+        """t_edge is the larger of the two edge times, and "may work up to"
+        is 1 / (2 x (t_edge + minimum pulse width))."""
         d = self.d
         assert d["t_edge_ns"] == max(d["t_rise_ns"], d["t_fall_ns"])
         assert d["f_may_work_hz"] == pytest.approx(

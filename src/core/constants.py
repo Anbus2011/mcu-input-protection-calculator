@@ -25,7 +25,7 @@ NEW_DESIGN_UNITS = {"r1": "kΩ", "r2": "kΩ", "rs": "Ω"}
 BANDWIDTH_STARTING_VALUES = {
     # Engineering estimate for a short PCB trace (2-5 pF typical); no datasheet source
     "c_stray_pf": 3,
-    # owner's example, 2026-11-09: 1 MHz reliable, 1.5 MHz may work
+    # 1.5 MHz "may work" gives 1 MHz "reliable"
     "margin_factor": 1.5,
 }
 

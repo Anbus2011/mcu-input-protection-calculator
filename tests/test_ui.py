@@ -478,8 +478,8 @@ def test_file_with_unusable_values_opens_with_a_warning(w, dialogs, tmp_path):
 # ── No presets: values come from the file or from typing ──────────────────────
 
 def test_no_preset_dropdown(w):
-    """Rewritten (was: preset shown as modified). The Clamp Diode panel has
-    no drop-down of parts and nothing fills its fields by itself."""
+    """The Clamp Diode panel has no drop-down of parts and nothing fills its
+    fields by itself."""
     panel = w.diode_panel
     assert not hasattr(panel, "preset") and not hasattr(panel, "modified_label")
     labels = set(all_label_texts(panel))
@@ -496,7 +496,8 @@ def test_no_preset_dropdown(w):
 # ── An example file gives frequency outputs ───────────────────────────────────
 
 def test_example_file_gives_frequency_outputs(w, dialogs):
-    """Rewritten (was: results.div gives bandwidth outputs after a fill)."""
+    """The Schottky example opens with every Signal Bandwidth output filled
+    in, and the fill button puts back only what is blank."""
     dialogs.askopenfilename.return_value = SCHOTTKY_DIV
     w._file_open()
     w.update()
@@ -698,8 +699,10 @@ def test_solver_warning_visible(w, monkeypatch):
 # ── No injection estimate; Safe Max is the guard ──────────────────────────────
 
 def test_no_injection_row_and_safe_max_is_the_guard(w):
-    """Rewritten (owner, 2026-11-09; was: the injection row is an estimate).
-    The row, its limit field and the 100 Ω are gone."""
+    """There is no injection row, no injection-limit field and no 100 Ω in a
+    tooltip. The Safe Max tooltips (the field and the Limit column) say that
+    its check is the guard against current into the pin's protection
+    structures."""
     load_design(w, schottky_rail())
     labels = set(all_label_texts(w))
     assert not [t for t in labels if "njection" in t]
@@ -709,8 +712,7 @@ def test_no_injection_row_and_safe_max_is_the_guard(w):
     assert not [t for t in _Tooltip.all_texts if "100 Ω" in t or "+ 100" in t]
     guard = [t for t in _Tooltip.all_texts if "guard against" in t]
     assert len(guard) >= 2                  # Safe Max field and the Limit column
-    assert all("no separate\ninjection-current estimate" in t or "protection diodes" in t
-               for t in guard)
+    assert all("protection structures" in t for t in guard)
     assert text(w.safety_tab.rec_row["value"]) == "3.651 V"
     assert text(w.safety_tab.rec_row["margin"]) == "-51 mV"
     assert text(w.safety_tab.rec_row["status"]) == "✗ FAIL"
@@ -854,7 +856,8 @@ def test_add_and_delete_row_buttons(w):
 
 
 def test_table_has_three_states_shown_plainly(w):
-    """Rewritten (was: the "no reverse data" note)."""
+    """Rows, blank and not modelled: the panel says which state a table is
+    in, and the "Not modelled" box and "+ Add row" move between them."""
     load_reference(w)
     reverse = table(w, "reverse")
     box = reverse.not_modelled_box
@@ -925,9 +928,8 @@ def test_input_levels_table(w):
     rows = w.operating_tab.rows
     assert list(rows) == ["min_input", "zero", "logic_low", "logic_high",
                           "analog_fullscale", "max_input", "touch"]
-    # Rewritten: the Max Input row shows both of its limits (was "≤ 4.0V abs"),
-    # and every requirement has a space before its unit, as the row's
-    # voltages have (was "> VIH 2.31V").
+    # The Max Input row shows both of its limits, and every requirement has
+    # a space before its unit, as the row's voltages have.
     assert [text(c) for c in rows["logic_high"].values()] == [
         "3.80 V", "1.831 V", "2.110 V", "> VIH 2.31 V", "✗ FAIL"]
     assert [text(c) for c in rows["logic_low"].values()] == [
@@ -954,7 +956,7 @@ def test_min_input_row(w):
     type_into(w, "system.v_input_min", "-5")
     assert [text(c) for c in s.min_row.values()] == ["-0.293 V", "-0.30 V", "+7 mV", "✓ PASS"]
     row = w.operating_tab.rows["min_input"]
-    # Rewritten: a space before the unit (was "≥ -0.30V pin min")
+    # A space before the unit
     assert text(row["thresh"]) == "≥ -0.30 V pin min" and text(row["status"]) == "✓ PASS"
     type_into(w, "mcu.v_pin_min", "-0.2")
     assert text(s.min_row["status"]) == "✗ FAIL" and text(s.min_row["margin"]) == "-93 mV"
@@ -1066,8 +1068,8 @@ def test_clamp_diode_rows(w):
     assert row(pair) == row(d.help["diode.anode"]) == 2
     assert "diode.cathode" not in d.help
     assert [t for t in all_label_texts(pair)] == ["Anode", "Cathode"]
-    # Rewritten: Capacitance (pF) and Ptot (mW) have a row each on the grid,
-    # with the "?" in the "?" column (was: one row, each "?" beside its unit).
+    # Capacitance (pF) and Ptot (mW) have a row each on the grid, with the
+    # "?" in the "?" column.
     for i, (key, unit) in enumerate((("diode.capacitance_pf", "pF"), ("diode.ptot_mw", "mW")),
                                     start=3):
         entry, help_ = widget(w, key), d.help[key]

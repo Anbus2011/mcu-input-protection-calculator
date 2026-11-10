@@ -22,15 +22,14 @@ def current_ma(volts, column="typ"):
     return clamp_solver._curve_current(curve(column), volts) * 1000
 
 
-# ── Diode table model (rewritten: was the three-region Zener model) ──────────
+# ── Diode table model ────────────────────────────────────────────────────────
 
 class TestDiodeCurve:
     """Verify the table model: ln(current) linear in voltage between rows,
     first and last segment extended."""
 
     def test_no_voltage_no_current(self):
-        """Rewritten: the old model put the Zener at its knee voltage at zero
-        current. The table model has no current at or below 0 V."""
+        """The table model has no current at or below 0 V."""
         assert current_ma(0.0) == 0.0
         assert current_ma(-1.0) == 0.0
 
@@ -158,8 +157,8 @@ class TestFullCalculation:
             prev_h = op["high"]
 
     def test_plot_data_from_app_state_not_from_the_solver(self):
-        """Rewritten: the solver returns no plot data. AppState sweeps the
-        solver's pin-voltage function and holds plain lists."""
+        """The solver returns no plot data. AppState sweeps the solver's
+        pin-voltage function and holds plain lists."""
         assert not [k for k in self.r if "plot" in k]
         assert not [k for k in self.d if "plot" in k]
         plot = app_state().plot_data

@@ -649,43 +649,40 @@ class McuPanel(_FieldPanel):
 
         self._wide_row(grid, "Part:", "mcu.part")
         self._row(grid, "Pin type:", "mcu.pin_type", "",
-                  "A label for the kind of pin, such as TT or FT. The limits\n"
+                  "A label for the kind of pin, for example 5 V tolerant. The limits\n"
                   "below are the ones the data sheet gives for that pin type.")
         rows = [
             ("mcu.vdd", "VDD/VDDA:", "V",
              "Supply voltage. Also used as the ADC reference (VREF), and as the\n"
              "voltage of the rail when the clamp diode is connected to vdd."),
             ("mcu.v_recommended_max", "Safe Max:", "V",
-             "Highest pin voltage in normal operation. The check against it is\n"
-             "the guard against current into the pin's protection diodes.\n"
-             "STM32G4 TT pins: VDD + 0.3 V (DS12983 Rev 5, Table 17)."),
+             "Highest pin voltage in normal operation. Its check is the\n"
+             "guard against current into the pin's protection structures.\n"
+             "MCU data sheet: operating conditions (pin input voltage)."),
             ("mcu.v_absolute_max", "Abs. Max:", "V",
              "Absolute maximum pin voltage: above it the pin may be damaged.\n"
              "The highest pin voltage at Max Input is checked against it.\n"
-             "STM32G4 TT pins: 4.0 V (DS12983 Rev 5, Table 14)."),
+             "MCU data sheet: absolute maximum ratings."),
             ("mcu.v_pin_min", "Pin Min:", "V",
              "Lowest allowed pin voltage (0 or negative). Checked only when a\n"
              "negative Min Input is given.\n"
-             "STM32G4: VSS - 0.3 V (DS12983 Rev 5, Table 14)."),
+             "MCU data sheet: absolute maximum ratings."),
             ("mcu.adc_bits", "ADC bits:", "bits",
              "ADC resolution N; resolution = VREF / 2^N.\n"
-             "STM32G4: 12-bit ADCs (STM32G484 datasheet DS12983 Rev 5, "
-             "Features: 5 x 12-bit ADCs)."),
+             "MCU data sheet: ADC characteristics."),
             ("mcu.vil_factor", "VIL factor:", "×VDD",
              "Pin input-low threshold as a fraction of VDD (VIL = factor × VDD).\n"
-             "STM32G4: 0.3 (STM32G484 datasheet DS12983 Rev 5, Table 54, "
-             "all I/Os except FT_c)."),
+             "MCU data sheet: I/O static characteristics, for the pin type used."),
             ("mcu.vih_factor", "VIH factor:", "×VDD",
              "Pin input-high threshold as a fraction of VDD (VIH = factor × VDD).\n"
-             "STM32G4: 0.7 (STM32G484 datasheet DS12983 Rev 5, Table 54, "
-             "all I/Os except FT_c)."),
+             "MCU data sheet: I/O static characteristics, for the pin type used."),
             ("mcu.c_pin_pf", "C_pin:", "pF",
              "MCU pin input capacitance. Used for the Signal Bandwidth time\n"
-             "constant. STM32G4: CIO 5 pF typ (DS12983 Rev 5, Table 54)."),
+             "constant. MCU data sheet: I/O static characteristics."),
             ("mcu.t_pulse_min_ns", "Min pulse width:", "ns",
              "Shortest pulse the input peripheral accepts. Used for the Signal\n"
-             "Bandwidth limits. STM32G4 timer inputs: 2 to 3 timer clock\n"
-             "periods (DS12983 Rev 5, Table 84)."),
+             "Bandwidth limits. MCU data sheet: timer input characteristics\n"
+             "(often given as a number of timer clock periods)."),
         ]
         for key, label, unit, tip in rows:
             self._row(grid, label, key, unit, tip)
@@ -781,8 +778,7 @@ class BandwidthInputPanel(_FieldPanel):
                        lbl_w=LBL_W, ent_w=ENT_W, unit_w=UNIT_W)
         self._labelled(board, "Margin factor:", "bw.margin_factor", "",
                        "\"Reliable up to\" = \"may work up to\" ÷ this factor (1 or more).\n"
-                       "Starting value 1.5: owner's example, 2026-11-09: 1 MHz\n"
-                       "reliable, 1.5 MHz may work.",
+                       "Starting value 1.5: 1.5 MHz may work gives 1 MHz reliable.",
                        lbl_w=LBL_W, ent_w=ENT_W, unit_w=UNIT_W)
 
         self.fill_button = ctk.CTkButton(

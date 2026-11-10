@@ -18,7 +18,8 @@ This project uses a strict Controller/Model/View decoupled architecture.
 * **`divcheck.py`**: Command-line checker. Must not import customtkinter, matplotlib or numpy.
 * **Rule: one solver.** Never embed calculation logic inside a UI button click or input callback. Always route through `AppState`, which calls `solve()`. Do not add a second calculation path.
 * **Rule: one set of input rules.** Range and table rules live in `clamp_solver.py` (`NUMBER_RULES`, `CROSS_RULES`, `table_problems`, `wiring_problems`). The file validator and `AppState` use them; do not copy them.
-* **Rule: no hidden defaults.** The UI forwards the raw text of every field to `AppState`, which parses it. A blank field stays blank, and nothing substitutes a value the user can't see (no `.get(key, default)`, no dataclass defaults, no fallback numbers). Blank or unreadable text becomes `None`; every result that depends on it shows "needs input" (or is cleared, with the reason shown), and everything that doesn't depend on it still computes. The only values the app fills in by itself are visible ones: the Signal Bandwidth starting values in `constants.py` (each with a source note). Every clamp diode and MCU value comes from the `.div` file or from the user typing it. R_s blank or 0 means no series resistor: nothing else is asked for it and it has no power check.
+* **Rule: no hidden defaults.** The UI forwards the raw text of every field to `AppState`, which parses it. A blank field stays blank, and nothing substitutes a value the user can't see (no `.get(key, default)`, no dataclass defaults, no fallback numbers). Blank or unreadable text becomes `None`; every result that depends on it shows "needs input" (or is cleared, with the reason shown), and everything that doesn't depend on it still computes. The only values the app fills in by itself are visible ones, both in `constants.py`: the Signal Bandwidth starting values (`BANDWIDTH_STARTING_VALUES`, each with a source note) and the unit selectors of a new design (`NEW_DESIGN_UNITS`: kΩ, kΩ, Ω). Every clamp diode and MCU value comes from the `.div` file or from the user typing it. R_s blank or 0 means no series resistor: nothing else is asked for it and it has no power check.
+* **Rule: part-agnostic.** Nothing in `src/` (code, labels, tooltips, comments) or in the rules of this file names a specific MCU, diode, resistor, vendor or data sheet, or gives a part's data-sheet value. Every part value comes from the `.div` file or the user. Part names and data-sheet values belong only in `examples/`, the data-sheet readings in `docs/`, `tests/`, and the Verification Baseline (which describes the example files). Zener and Schottky are kinds of diode the app supports and may be named. A test reads `src/`, `divcheck.py` and `main.py` for part names (`test_solver_rules.py`, `PART_SPECIFIC_PATTERNS`).
 * **Rule: three table states.** Each clamp-diode table is blank (`null`: not filled in; it is listed under "Needs input" and blocks the results that use it), not modelled (`[]`: its current is taken as zero) or rows. The Clamp Diode panel and the `divcheck.py` summary say which state a table is in, and tell blank and not modelled apart. New Design starts both tables blank. A "Not modelled" box per table switches a table with no rows between blank and not modelled; "+ Add row" turns either into rows; deleting the last row returns the table to blank.
 * **Rule: open + save gives the inputs back.** A file that is opened and saved without editing gets every input section back exactly as written (10 stays 10, 10.0 stays 10.0; `null`, `[]` and `created` stay). `AppState` remembers the value each field and table cell was loaded with and writes it back while its text is unchanged. An edited value is written as entered. Only `results` may change.
 * **Rule: an edit unticks "checked".** Editing any value of the clamp diode or of the MCU (table cells and rows included) unticks that part's "Checked against the data sheet" box. Editing its Part, Source or Note does not.
@@ -57,17 +58,17 @@ The diode is described by measured points from its data sheet, not by a diode ty
 
 ### C. Typical and Worst Case
 * **Typical:** nominal R1 and R2, `v_typ` column.
-* **Worst case:** solve all eight corners, R1 {min, max} × R2 {min, max} × diode column {`v_min`, `v_max`}, and take the highest or the lowest as the check requires. R min = R × (1 − tol), R max = R × (1 + tol). **Do not reason about which corner is worst**: with leakage from a rail diode the answer is not always the obvious one (BAT54CV example: the lowest pin voltage at Logic High is with `v_max`, the highest at Logic Low with `v_min`).
+* **Worst case:** solve all eight corners, R1 {min, max} × R2 {min, max} × diode column {`v_min`, `v_max`}, and take the highest or the lowest as the check requires. R min = R × (1 − tol), R max = R × (1 + tol). **Do not reason about which corner is worst**: with leakage from a rail diode the answer is not always the obvious one (in the Schottky-to-rail example file: the lowest pin voltage at Logic High is with `v_max`, the highest at Logic Low with `v_min`).
 * Input levels solved: Min Input (when given), 0 V, Logic Low, Logic High, ADC Scale (when given), Max Input, Touch (when given). Each has `typ`, `low` and `high`.
 
 ### D. Checks
 Statuses are PASS, TIGHT, FAIL and "needs input". The overall verdict is the worst status among the checks that have one, in the order FAIL, "needs input", TIGHT, PASS.
 
 1. **Highest input** (at Max Input, highest pin voltage):
-   * `pin_max_safe` against Safe Max: PASS with at least 50 mV of margin, TIGHT down to 0, FAIL above the limit. Safe Max is the guard against injection (STM32: VDDA + 0.3 V, the threshold before internal ESD injection begins).
+   * `pin_max_safe` against Safe Max: PASS with at least 50 mV of margin, TIGHT down to 0, FAIL above the limit. Safe Max is the highest pin voltage in normal operation, from the MCU data sheet; its check is the guard against current into the pin's protection structures.
    * `pin_max_abs` against Absolute Max: PASS with at least 100 mV, TIGHT down to 0, FAIL above.
 2. **Lowest input** (`pin_min`): only when Min Input is given and negative. Lowest pin voltage against the MCU's Pin Min. FAIL below the limit, otherwise PASS.
-3. **Logic levels:** `logic_high`: at the Logic High input the lowest pin voltage must be above VIH. `logic_low`: at the Logic Low input the highest pin voltage must be below VIL. $V_{IL} = k_{VIL} \times VDD$, $V_{IH} = k_{VIH} \times VDD$ (STM32G4: 0.3 and 0.7, DS12983 Rev 5, Table 54). One pair of levels per file.
+3. **Logic levels:** `logic_high`: at the Logic High input the lowest pin voltage must be above VIH. `logic_low`: at the Logic Low input the highest pin voltage must be below VIL. $V_{IL} = k_{VIL} \times VDD$, $V_{IH} = k_{VIH} \times VDD$. One pair of levels per file.
 4. **Power** at Max Input (`power_r1`, `power_r2`, `power_diode`, `power_rs`):
    * Typical: nominal R1/R2, `v_typ`. $P_{R1} = I_{R1}^2 R1$, $P_{R2} = I_{R2}^2 R2$, $P_{diode} = |V_{diode}| \cdot |I_{diode}|$. Total power = R1 + R2 + diode (typical).
    * Worst case, per part: the maximum over the eight corners, plus the typical point.
@@ -102,7 +103,7 @@ The question the tab answers: what input frequency can a pin with this divider a
 
 ### F. The `.div` File and the Checker
 * Format 2.0 is described in `docs/div_v2_format.md`; keep that file in step with any change. Every key must be present (`null` for blank), unknown keys are errors, numbers are JSON numbers.
-* `results` is written only by the solver: `solver_version` (the constant `SOLVER_VERSION`, not a git hash), the verdict, the checks (id, status, value, limit, unit), information rows, the key voltages, inputs still needed, notes and warnings. The app ignores stored results when it opens a file and solves again. **Bump `SOLVER_VERSION` when a change alters any result.**
+* `results` is written only by the solver: `solver_version` (`SOLVER_VERSION`: a constant in the code, not a git hash, so a file's results can be traced to a solver version without git), the verdict, the checks (id, status, value, limit, unit), information rows, the key voltages, inputs still needed, notes and warnings. The app ignores stored results when it opens a file and solves again. **Bump `SOLVER_VERSION` when a change alters any result.**
 * The loader reports every problem, each with its key path. Format problems (a wrong type, a missing or unknown key, or a unit, an anode/cathode terminal or a diode type that is not one of the allowed values) stop a file from opening. Value problems (out of range, table rows out of order) open in the app and are listed under "Fix:"; `divcheck.py` rejects the file for either kind.
 * `python divcheck.py in.div [out.div] [--json out.json]`: exit 0 valid and solved (whatever the statuses), 1 invalid with every problem listed, 2 a file could not be read or written.
 * `examples/` holds two fixtures: `zener_gnd_bzb984_c3v3.div` and `schottky_rail_bat54cv.div`. Their stored results are tested against the solver; regenerate with `python divcheck.py examples/x.div examples/x.div`.
@@ -114,13 +115,13 @@ After ANY code change, run the test suite before committing:
 python -m pytest tests/ -v
 ```
 
-All 820 tests must pass. The UI tests carry the pytest marker `ui` (registered in `pytest.ini`); they need a desktop session and take a little over three minutes. While working, `python -m pytest tests/ -m "not ui"` runs the others in about 35 seconds. Run the whole suite before committing.
+All 821 tests must pass. The UI tests carry the pytest marker `ui` (registered in `pytest.ini`); they need a desktop session and take a little over three minutes. While working, `python -m pytest tests/ -m "not ui"` runs the others in about 35 seconds. Run the whole suite before committing.
 
 The non-UI tests still need the packages in `requirements.txt` installed: pytest imports `tests/test_ui.py` to collect it even when its tests are deselected, and one non-UI test (`test_plot_is_not_numpy` in `test_app_state.py`) imports the plot module. Only the UI tests also need a desktop session.
 
 What each file covers:
 * `test_clamp_solver.py`: the solver: reference numbers, the wirings, the diode tables, bisection, "needs input", every check and its thresholds, the verdict.
-* `test_solver_rules.py`: the solver's rules: one solver, nothing computed from a missing input, no fallback values, worst-case power.
+* `test_solver_rules.py`: the solver's rules: one solver, nothing computed from a missing input, no fallback values, worst-case power, no part named in the app (part-agnostic).
 * `test_design_calculation.py`: the whole calculation on the baseline design and the 8.2 kΩ / 29 kΩ design.
 * `test_frequency.py`: the time constant, the two edge times, the two frequency limits.
 * `test_div_format.py`: the file format: the two example files and their stored results, every format and value problem, atomic write.
@@ -133,6 +134,8 @@ What each file covers:
 If a test fails after your change, fix the issue before committing. Do not skip or delete tests.
 
 ### Verification Baseline
+The parts named here are the parts of the example files, not assumptions of the app.
+
 If you modify `clamp_solver.py`, ensure these reference calculations still hold (`examples/zener_gnd_bzb984_c3v3.div`):
 * **Inputs:** R1 = 10 kΩ, R2 = 18 kΩ (1 %), no R_series, V_input = 30 V, VDD 3.3 V, BZB984-C3V3 from the node (cathode) to GND. Reverse table: typical column from the data sheet's Fig. 7; `v_min` = typical − 0.18 V and `v_max` = typical + 0.22 V in every row (Table 8: 3.10 to 3.50 V at 5 mA, where Fig. 7 reads 3.28 V).
 * **Expected Outputs:**
@@ -159,7 +162,7 @@ Schottky to the rail (`examples/schottky_rail_bat54cv.div`, BAT54CV, same divide
 * The name "Zener" for the clamp diode on the screen: the diode can be a Schottky.
 * The injection current estimate, the Injection Limit field and the `safe_injection_ma` key: Safe Max is the guard.
 * The 100 Ω internal ESD path, in any formula: no data sheet gives it.
-* The ADC sampling-cycle table: it did not match DS12983 Rev 5, Table 67.
+* The ADC sampling-cycle table: it did not match the MCU data sheet.
 * A hint value for a blank rating: it gives "needs input".
 * Signal Bandwidth inputs N_samples, peripheral clock, counter bits and signed.
 * f_read and the counter-overflow limit.

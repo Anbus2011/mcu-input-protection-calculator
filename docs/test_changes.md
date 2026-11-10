@@ -276,3 +276,25 @@ These tests still check the same behaviour, but an expected value or an assertio
 | `test_app_state.py::TestLoading` (kept cases), `test_ui.py::test_malformed_file_keeps_current_design`, `test_failed_load_keeps_change_tracking` | The file under test is built from the baseline design or is an example file (was `results.div`). The UI test also checks that every problem is listed. |
 | `test_ui.py::test_unit_combo_and_checkbox` | The checkbox is the clamp diode's "checked" box (was "Counter signed"). |
 | `test_ui.py::test_new_design_clears_everything` | Rows whose optional input is blank show "--". Of the 0 V row only its input voltage is independent of the inputs now. The diode tables are checked to be blank, "Not filled in" (was: the preset selector is blank). |
+
+## Later: the part-agnostic change (branch `docs-fixes`)
+
+The app's tooltips, comments and documents no longer name a part or a data sheet (CLAUDE.md §2, "part-agnostic"). No result changed. The suite went from 820 to 821 tests: one added, none removed.
+
+| Test | Change |
+|---|---|
+| `test_solver_rules.py::TestPartAgnostic::test_app_names_no_part_vendor_or_data_sheet` | Added. Reads every `.py` file under `src/`, `divcheck.py` and `main.py`, and fails if one has a part number, a vendor or a data-sheet table reference (the list is `PART_SPECIFIC_PATTERNS`). |
+| `test_ui.py::test_no_injection_row_and_safe_max_is_the_guard` | The tooltip sentence "there is no separate injection-current estimate" is gone, so it is no longer asserted: every tooltip with "guard against" must say "protection structures". The assertions on the row, the limit field and the 100 Ω are unchanged. |
+| `test_clamp_solver.py::TestSchottkyToRail::test_hand_check_maximum_column` | Diode current 2.44 mA within 0.01 → 2.432 mA within 0.001, the solver's value. |
+| `test_app_state.py::TestBandwidthStartingValues::test_margin_factor_starting_value` | The source note it reads in `constants.py` is now `1.5 MHz "may work" gives 1 MHz "reliable"`; it had a date and "owner's example". |
+
+Test docstrings and comments no longer carry dates, "owner" or "Rewritten (was: ...)"; they say what the test checks now. The history they held is in the tables above, except these notes, which were only in a test comment:
+
+| Test | Note |
+|---|---|
+| `test_clamp_solver.py::TestReferenceNumbers::test_table` | The table was reset on 2026-11-09 for minimum = typical − 0.18 V and maximum = typical + 0.22 V. With typical ∓ 0.2 V the lowest and highest were 14 to 20 mV lower (`docs/session2_prompt.md`). |
+| `test_clamp_solver.py::TestAnalog::test_range_against_vdd` | Owner decision, 2026-11-09: no TIGHT band up to Safe Max. |
+| `test_divcheck.py::TestSummary::test_blank_design` | Both tables of a blank design are `null`; the summary lines asserted were "No forward data" / "No reverse data" while a blank table was `[]`. |
+| `test_ui.py::test_table_has_three_states_shown_plainly` | Was: the "no reverse data" note. |
+| `test_ui.py::test_input_levels_table`, `test_min_input_row` | The Max Input requirement was "≤ 4.0V abs"; requirements had no space before the unit ("> VIH 2.31V", "≥ -0.30V pin min"). |
+| `test_ui.py::test_clamp_diode_rows` | Capacitance and Ptot were on one row, each "?" beside its unit. |
