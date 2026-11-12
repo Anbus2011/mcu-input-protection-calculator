@@ -106,7 +106,7 @@ The question the tab answers: what input frequency can a pin with this divider a
 * Format 2.0 is described in `docs/div_v2_format.md`; keep that file in step with any change. Every key must be present (`null` for blank), unknown keys are errors, numbers are JSON numbers.
 * `results` is written only by the solver: `solver_version` (`SOLVER_VERSION`: a constant in the code, not a git hash, so a file's results can be traced to a solver version without git), the verdict, the checks (id, status, value, limit, unit), information rows, the key voltages, inputs still needed, notes and warnings. The app ignores stored results when it opens a file and solves again. **Bump `SOLVER_VERSION` when a change alters any result.**
 * The loader reports every problem, each with its key path. Format problems (a wrong type, a missing or unknown key, or a unit, an anode/cathode terminal or a diode type that is not one of the allowed values) stop a file from opening. Value problems (out of range, table rows out of order) open in the app and are listed under "Fix:"; `divcheck.py` rejects the file for either kind.
-* `python divcheck.py in.div [out.div] [--json out.json]`: exit 0 valid and solved (whatever the statuses), 1 invalid with every problem listed, 2 a file could not be read or written.
+* `python divcheck.py in.div [out.div] [--json out.json]`: exit 0 valid and solved (whatever the statuses), 1 invalid with every problem listed, 2 a file could not be read or written. Under Information its summary (which `solve_div` also returns) prints the information rows, then the time constant and the two edge times from the solver's details (`tau`, `t_rise`, `t_fall`, ns), each only when it has a value; these three are not stored in a file's `results`.
 * `examples/` holds two fixtures: `zener_gnd_bzb984_c3v3.div` and `schottky_rail_bat54cv.div`. Their stored results are tested against the solver; regenerate with `python divcheck.py examples/x.div examples/x.div`, then copy the file to `skill/examples/`: the skill's self-test solves those copies through `solve_div`, and a test fails if they differ from `examples/`.
 
 ## 5. Testing
@@ -116,7 +116,7 @@ After ANY code change, run the test suite before committing:
 python -m pytest tests/ -v
 ```
 
-All 915 tests must pass. The UI tests carry the pytest marker `ui` (registered in `pytest.ini`); they need a desktop session and take a little over three minutes. While working, `python -m pytest tests/ -m "not ui"` runs the others in about 35 seconds. Run the whole suite before committing.
+All 923 tests must pass. The UI tests carry the pytest marker `ui` (registered in `pytest.ini`); they need a desktop session and take a little over three minutes. While working, `python -m pytest tests/ -m "not ui"` runs the others in about 35 seconds. Run the whole suite before committing.
 
 The non-UI tests still need the packages in `requirements.txt` installed: pytest imports `tests/test_ui.py` to collect it even when its tests are deselected, and one non-UI test (`test_plot_is_not_numpy` in `test_app_state.py`) imports the plot module. Only the UI tests also need a desktop session.
 
@@ -126,9 +126,9 @@ What each file covers:
 * `test_design_calculation.py`: the whole calculation on the baseline design and the 8.2 kΩ / 29 kΩ design.
 * `test_frequency.py`: the time constant, the two edge times, the two frequency limits.
 * `test_div_format.py`: the file format: the two example files and their stored results, every format and value problem, atomic write.
-* `test_divcheck.py`: the checker: summary, output files, the same `results` as the app's Save, exit codes, no GUI packages.
+* `test_divcheck.py`: the checker: summary (with the `tau`, `t_rise` and `t_fall` rows), output files, the same `results` as the app's Save, exit codes, no GUI packages.
 * `test_mcp_server.py`: the MCP server: the same results, file text, summary and problems as `divcheck.py`, the copies in `skill/examples/`, the commit and `dirty` in every answer, the PNG and its curves against `AppState`'s sweep, no customtkinter, a client round trip in process, over stdio and over HTTP.
-* `test_skill_md.py`: the skill: the `SOLVER_VERSION` that `skill/SKILL.md` states is the solver's, every tool and field it names exists in `skill/server.py` (and every `.div` key in the format), the wording of its data-sheet and sourcing rules, no part named; the package of `skill/build_package.py` holds `SKILL.md` and `skill/examples/` only.
+* `test_skill_md.py`: the skill: the `SOLVER_VERSION` that `skill/SKILL.md` states is the solver's, every tool and field it names exists in `skill/server.py` (and every `.div` key in the format), the wording of its data-sheet and sourcing rules, its design basis (threshold pair and leakage), its quadrature encoder section and the summary rows it reads, the Basis line and what-ifs of its report, no part named; the package of `skill/build_package.py` holds `SKILL.md` and `skill/examples/` only.
 * `test_file_io.py`: save and load round trip, other files refused, dirty tracking.
 * `test_app_state.py`: `AppState`: parsing, "needs input", range checks, the table states, loading and saving, open + save, "checked", the plot sweep.
 * `test_ui.py`: drives the real, withdrawn window through its widgets: every input, panel and tab, the tooltips, the plot. Three layout tests show the window at 1400×900 and are skipped on a screen it does not fit.

@@ -178,6 +178,77 @@ class TestSkillMd:
         assert template.index("\n    What-ifs\n") < template.index("\n    Needs input\n")
         assert "WHAT-IF: " in template and "every placeholder" in template
 
+    @pytest.mark.parametrize("wording", [
+        ["**Threshold basis.**", "more than one pair of input thresholds",
+         "guarantees by design for that pin", "`vil_factor` and `vih_factor`",
+         "`mcu.note` says which pair was used, with its table and footnote",
+         "tested in production, characterization, guaranteed by design",
+         "solved as a what-if and shown in the report",
+         "With only one pair in the data sheet, use it and say so"],
+        ["**Leakage basis.**", "the most-leaky column (`v_min`)",
+         "typical curve at the hot check temperature", "this is the design basis",
+         "A worst case is a labeled what-if, never the design file",
+         "the data sheet's maximum at temperature when it gives one",
+         "the 25 C maximum scaled by the typical temperature rise",
+         "`clamp_diode.note` says which basis each column uses"],
+    ], ids=["thresholds", "leakage"])
+    def test_design_basis_rules_are_stated(self, wording):
+        basis = text_of(SKILL_MD).split("\n## Design basis\n")[1].split("\n## ")[0]
+        bullets = [b for b in basis.split("\n- ") if wording[0] in b]
+        assert len(bullets) == 1, wording[0]
+        for phrase in wording:
+            assert phrase in bullets[0], phrase
+
+    def test_bench_check_measures_the_leakage_hot(self):
+        text = text_of(SKILL_MD)
+        bench = text.split("7. **Bench check.**")[1].split("\n## ")[0]
+        assert "leakage is measured hot" in bench
+
+    def test_encoder_section_is_stated(self):
+        section = text_of(SKILL_MD).split(
+            "\n## Quadrature encoder inputs\n")[1].split("\n## ")[0]
+        for phrase in [
+                "arithmetic is the skill's own and is shown in the report",
+                "one pulse is one full cycle on one channel",
+                "lines per revolution is pulses per revolution", "counts are 4 per pulse",
+                "f_gap = 1 / (4 x (|t_rise - t_fall| + t_pulse_min_ns)), "
+                "divided by `margin_factor`",
+                "the lower of f_reliable and f_gap. Say which one set it",
+                "counts per second (4 x frequency)",
+                "max RPM = 60 x frequency / lines per revolution",
+                "500, 1000, 1024, 2048, 2500, 4096 and 5000 lines per revolution",
+                "solve a what-if copy with the input levels narrowed to that source",
+                "next to the generic one",
+                "not the encoder's own output limit or the cable's",
+                "stop and say the server needs updating"]:
+            assert phrase in section, phrase
+
+    def test_the_summary_rows_the_encoder_section_reads_are_the_summarys(self):
+        """f_reliable, t_rise and t_fall are rows of the summary solve_div
+        returns, under Information, when they have a value."""
+        section = text_of(SKILL_MD).split(
+            "\n## Quadrature encoder inputs\n")[1].split("\n## ")[0]
+        rows = ["f_reliable", "t_rise", "t_fall"]
+        assert "the f_reliable, t_rise and t_fall rows under Information" in section
+        solved = [server.solve_div(text_of(os.path.join(SKILL_EXAMPLES_DIR, n)))["summary"]
+                  for n in sorted(os.listdir(SKILL_EXAMPLES_DIR))]
+        with_edges = [s for s in solved if "\n  t_rise " in s]
+        assert with_edges, "an example with edge times"
+        for summary in with_edges:
+            information = summary.split("\nInformation\n")[1].split("\n\n")[0]
+            for row in rows:
+                assert re.search(rf"^  {row} +\d", information, re.MULTILINE), row
+
+    def test_report_has_a_basis_line_and_the_basis_what_ifs(self):
+        template = text_of(SKILL_MD).split("\n## Report template\n")[1]
+        assert template.index("\n    Basis: thresholds ") < template.index("\n    Requirements\n")
+        assert "; leakage " in template.split("\n    Basis: ")[1].split("\n")[0]
+        what_ifs = template.split("\n    What-ifs\n")[1].split("\n    Needs input\n")[0]
+        assert "WHAT-IF other threshold pair: " in what_ifs
+        assert "WHAT-IF worst-case leakage: " in what_ifs
+        assert "WHAT-IF source " in what_ifs
+        assert template.index("\n    Encoder ") < template.index("\n    What-ifs\n")
+
     def test_names_no_part_vendor_or_data_sheet(self):
         """Part-agnostic, as the code is (the same patterns)."""
         found = [f"SKILL.md:{number}: {pattern} in {line.strip()!r}"
