@@ -32,6 +32,9 @@ LEVEL_NAMES = {"min_input": "Min Input", "zero": "0 V", "logic_low": "Logic Low"
 INFO_SOURCE = {"f_may_work": "f_limits", "f_reliable": "f_limits",
                "rail_current": "power_worst", "touch_pin_high": "touch",
                "touch_diode_current": "touch", "touch_r1_power": "touch"}
+# Information rows taken from the solver's details (not stored in a file's
+# results): label -> details key. Printed only when they have a value.
+EDGE_ROWS = (("tau", "tau_ns"), ("t_rise", "t_rise_ns"), ("t_fall", "t_fall_ns"))
 
 
 def _number(value, unit) -> str:
@@ -88,6 +91,10 @@ def summary(name: str, data: dict, results: dict) -> str:
         if row["value"] is None and INFO_SOURCE[row["id"]] not in results["missing"]:
             text = "none"                # not waiting for an input: see the note
         lines.append(f"  {row['id']:<20} {text:>13}")
+    for label, key in EDGE_ROWS:         # from details, only when they have a value
+        value = results["details"][key]
+        if value is not None:
+            lines.append(f"  {label:<20} {_number(value, 'ns'):>13}")
     lines += [f"  {note}" for note in results["notes"]]
 
     lines += ["", f"Pin voltage (V)   {'input':>8} {'lowest':>8} {'typical':>8} {'highest':>8}"]

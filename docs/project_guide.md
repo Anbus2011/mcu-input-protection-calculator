@@ -35,7 +35,9 @@ What this project is for, what the Claude skill does, and the workflow from requ
 - the workflow below and the check list;
 - resistor values from the E96 series, 1 % tolerance by default;
 - the resistor specification: value, tolerance, power rating after derating to the check temperature, and working voltage;
-- the report template.
+- the design basis: the threshold pair (when the MCU data sheet gives more than one, the pair it guarantees by design for that pin; the other pair is a what-if) and the leakage (the most-leaky column of a leakage table is the typical curve at the hot check temperature; a worst case is a what-if);
+- the arithmetic for an input whose role includes a quadrature encoder;
+- the report template, with a Basis line near the top.
 
 **In chat:**
 - confirming the requirements (asked once per board, then saved);
@@ -60,6 +62,9 @@ What this project is for, what the Claude skill does, and the workflow from requ
 - The skill changes R1 and R2 until every check is PASS. A TIGHT check is not the end while a PASS is reachable; when a PASS is not reachable, the skill reports the TIGHT check as a choice for the user. After about five solves without progress it stops and reports which check can't pass and the options.
 - A check the solver doesn't make (for example resistor derating at temperature, or the board's minimum rail load) is reported as done by the skill or as not checked, never as PASS. A check the skill makes shows its arithmetic in the report: which `solve_div` value, which rating or limit, the result.
 - `rating_mw` in the `.div` is the data-sheet rating as stated. Derating to the check temperature is the skill's own check, in its report.
+- **Threshold basis.** When the MCU data sheet gives more than one pair of input thresholds, the design basis is the pair the data sheet guarantees by design for that pin. `mcu.note` says which pair was used, with its table and footnote, and how the data sheet qualifies each pair (tested in production, characterization, guaranteed by design). The other pair is solved as a what-if and shown in the report. If no pair is guaranteed by design, the skill stops and asks the user which pair is the design basis. With only one pair, the skill uses it and says so. A threshold given as an offset from VDD is worked out at the file's VDD and divided by VDD to give the factor, with the arithmetic in `mcu.note`.
+- **Leakage basis.** In a reverse table that describes leakage, the most-leaky column is the data sheet's typical curve at the hot check temperature: the design basis. A worst case is a labeled what-if, never the design file: the data sheet's maximum at temperature when it gives one, otherwise the 25 C maximum scaled by the typical temperature rise. `clamp_diode.note` says which basis each column uses.
+- **Quadrature encoder.** For an input whose role includes one, the skill works out from the `solve_div` summary (`f_reliable`, `t_rise`, `t_fall`) and the file (minimum pulse width, margin factor), and shows in its report: the A-to-B gap limit, f_gap = 1 / (4 × (|t_rise − t_fall| + t_pulse_min)) ÷ margin factor; the frequency per channel, the lower of f_reliable and f_gap, and which one set it; pulses per second (the same number), counts per second (4 × frequency) and max RPM = 60 × frequency / lines per revolution, for the encoder's resolution or, without one, for 500 to 5000 lines per revolution. A specific source (known high and low levels) is a what-if copy with the input levels narrowed to it: `v_logic_high_min` its lowest high, `v_logic_low_max` its highest low, `v_input_max` its highest high. The copy is for frequency only; its power and highest-input checks are not reported. The encoder frequency is the input network's limit only, not the encoder's or the cable's. If the summary has a frequency limit but no rise and fall times, the skill stops and says the server needs updating. The app, `divcheck.py` and the server have no encoder logic: the frequency they give is the generic one.
 
 ## 3. The workflow
 
@@ -69,15 +74,16 @@ What this project is for, what the Claude skill does, and the workflow from requ
    - the required frequency;
    - analog full scale and allowed error;
    - the temperature range;
-   - the MCU pin type.
+   - the MCU pin type;
+   - for a quadrature encoder input, the encoder's resolution (lines per revolution), when known.
 
    A file holds one pair of logic levels, so with several sources it takes the lowest high and the highest low. Inputs with different roles (for example analog and digital) get one `.div` each. When one node feeds several MCU pins, the weakest pin's limits go in the file.
-2. **MCU.** The skill reads the MCU data sheet and fills in the `mcu` section, with `source`, `note` and `checked: false`.
+2. **MCU.** The skill reads the MCU data sheet and fills in the `mcu` section, with `source`, `note` and `checked: false`. The input thresholds follow the threshold basis.
 3. **Resistors.** The skill proposes the resistor criteria (values, tolerance, power rating, package) and agrees them with the user. It searches for part numbers only after that.
-4. **Diode.** The skill reads the diode data sheet and writes the `forward` and `reverse` tables. Temperature goes into the outer columns: `v_min` is the part that conducts most and `v_max` the part that conducts least, over the temperature range. For a Schottky those are the hot and the cold extremes, in both tables. The `note` says how each column was obtained, including any column the data sheet doesn't guarantee.
+4. **Diode.** The skill reads the diode data sheet and writes the `forward` and `reverse` tables. Temperature goes into the outer columns: `v_min` is the part that conducts most and `v_max` the part that conducts least, over the temperature range. For a Schottky those are the hot and the cold extremes, in both tables. A reverse table that describes leakage follows the leakage basis. The `note` says how each column was obtained, including any column the data sheet doesn't guarantee.
 5. **Solve.** Claude writes the `.div` and solves it through the MCP server. It changes R1 and R2 (E96 values) and solves again until every check passes, or reports which check can't pass and the options.
 6. **Review.** The user opens the file in the app and compares the MCU and diode values with the data sheets. They tick "checked" and adjust any close values.
-7. **Bench check.** Before a design is approved, sweep the input to about 5, 12, 24 and 30 V on a built board and compare the measured pin voltage with the typical curve.
+7. **Bench check.** Before a design is approved, sweep the input to about 5, 12, 24 and 30 V on a built board and compare the measured pin voltage with the typical curve. Measure the chosen diode's leakage hot, at the hot check temperature.
 
 ## 4. Out of scope
 

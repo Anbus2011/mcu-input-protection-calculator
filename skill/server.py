@@ -172,8 +172,10 @@ def solve_div(div_json: str, name: str = SUMMARY_NAME) -> dict[str, Any]:
     - problems: every problem as "key.path: message" (empty when valid).
     - div: the file's text with "results" filled in by the solver, ready to
       save as it is (null when invalid). The inputs are returned as sent.
-    - summary: a plain-text summary: verdict, checks, information rows, pin
-      voltages, inputs still needed (null when invalid).
+    - summary: a plain-text summary: verdict, checks, information rows (with
+      the time constant tau and the edge times t_rise and t_fall, ns, when
+      they have a value), pin voltages, inputs still needed (null when
+      invalid).
     - solver_version, commit, dirty: what solved it. dirty is true when the
       server's folder had uncommitted changes when it started. commit and
       dirty are null when git can't give them; solver_info says why.

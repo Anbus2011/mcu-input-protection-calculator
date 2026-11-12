@@ -357,6 +357,8 @@ Validates the file, solves it with the same calculation the app uses, and prints
 
 The summary tells a blank diode table from one that is not modelled: "Forward table not filled in: needs input" against "No forward data: forward conduction is not modelled" (and the same for the reverse table).
 
+Under **Information** the summary prints the information rows of the results, then the time constant and the two edge times of the Signal Bandwidth tab: `tau`, `t_rise` and `t_fall`, in ns, each only when it has a value. These three come from the solver's details and are not stored in the file's `results`.
+
 ---
 
 ## MCP Server
@@ -413,6 +415,10 @@ Use full paths: the Python that has the packages of `requirements.txt` installed
 `skill/SKILL.md` is the Claude skill that designs the protection network for one input and writes its `.div`. It holds the workflow from requirements to bench check, the rules and the report template. It does no math: every result comes from the MCP server above, so the server must be registered in Claude Desktop as well. `skill/SKILL.md` is the master copy: change it there, never in the copy installed in Claude.
 
 `SKILL.md` states its own version and the solver version it was written and tested for. At the start of every session the skill calls `solver_info` and stops if the server runs another solver version. It then solves its copies of the two example files through `solve_div` and stops if the results differ from the stored ones. A test fails if the solver version in `SKILL.md` is not the solver's, or if `SKILL.md` names a tool or a field the server does not have.
+
+The skill's design basis: when the MCU data sheet gives more than one pair of input thresholds, the pair the data sheet guarantees by design for the pin goes in the file and the other pair is solved as a what-if; in a reverse table that describes leakage, the most-leaky column is the data sheet's typical curve at the hot check temperature, and a worst-case leakage is a what-if only. The `note` of each section says which basis was used, and the report states both on its **Basis** line near the top.
+
+For an input whose role includes a quadrature encoder, the report has an Encoder section: from the summary's `f_reliable`, `t_rise` and `t_fall` and the file's minimum pulse width and margin factor, the skill works out (and shows) the A-to-B gap limit, the frequency per channel (the lower of the two), pulses and counts per second and the maximum RPM. This is the skill's own arithmetic; the app, `divcheck.py` and the server know nothing about encoders.
 
 ### Building the package
 
@@ -520,7 +526,7 @@ Everything else about a part (diode tables, capacitance, MCU limits, pin capacit
 python -m pytest tests/ -v
 ```
 
-All 915 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
+All 924 tests must pass. `tests/test_ui.py` drives the real window (withdrawn, and shown for three layout tests), so it needs a desktop session and takes a little over three minutes. Its tests carry the marker `ui`; to run the rest in about 35 seconds:
 
 ```bash
 python -m pytest tests/ -m "not ui"

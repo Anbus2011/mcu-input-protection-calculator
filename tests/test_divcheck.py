@@ -45,6 +45,9 @@ class TestSummary:
         assert lines["analog_error"][1] == "info"
         assert lines["f_may_work"][1] == "none"
         assert "The pin never reads high" in out
+        # tau has a value; the edge times do not (the pin never reads high)
+        assert "  tau                    2973.729 ns\n" in out
+        assert "t_rise" not in out and "t_fall" not in out
         assert "Max Input         30.000    2.840    3.020    3.239" in out
         assert "No forward data: forward conduction is not modelled" in out
         assert "Not yet checked against the data sheet: clamp diode, MCU" in out
@@ -57,8 +60,29 @@ class TestSummary:
         assert "Clamp diode: BAT54CV (schottky), anode node, cathode vdd" in out
         assert "f_may_work               1.347 MHz" in out
         assert "f_reliable             897.964 kHz" in out
-        assert "rail_current              2.493 mA" in out
+        assert ("  rail_current              2.493 mA\n"
+                "  tau                     116.871 ns\n"
+                "  t_rise                  353.560 ns\n"
+                "  t_fall                  255.192 ns\n\n") in out
         assert "No forward data" not in out and "No reverse data" not in out
+
+    def test_edge_rows_are_the_solvers_details(self, capsys):
+        """tau, t_rise and t_fall are the solver's details, in ns, printed
+        under Information (they are not information rows of the file)."""
+        divcheck.main([SCHOTTKY])
+        out = capsys.readouterr().out
+        details = solve(read_json(SCHOTTKY))["details"]
+        rows = {line.split()[0]: line.split()[1:] for line in out.splitlines()
+                if line.strip()}
+        for label, key in divcheck.EDGE_ROWS:
+            assert rows[label] == [f"{details[key]:.3f}", "ns"]
+        assert "tau" not in {row["id"] for row in read_json(SCHOTTKY)["results"]["info"]}
+
+    def test_edge_rows_without_a_value_are_left_out(self, tmp_path, capsys):
+        assert divcheck.main([write(tmp_path, blank_design())]) == 0
+        out = capsys.readouterr().out
+        assert not any(line.split()[0] in ("tau", "t_rise", "t_fall")
+                       for line in out.splitlines() if line.strip())
 
     def test_needs_input_is_listed_and_still_exits_0(self, tmp_path, capsys):
         data = zener_reference(mcu__vdd=None, resistors__r1__rating_mw=None)

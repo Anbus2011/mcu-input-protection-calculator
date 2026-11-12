@@ -237,6 +237,8 @@ It validates the file, solves it and prints a summary. With `out.div` it writes 
 
 The summary tells the two kinds of table with no rows apart: a `null` table prints "Forward table not filled in: needs input" (or "Reverse ..."), an empty `[]` table "No forward data: forward conduction is not modelled".
 
+Under Information the summary also prints the time constant and the two edge times (`tau`, `t_rise`, `t_fall`, ns), each only when it has a value. They come from the solver's working values and are not part of `results`.
+
 Exit code 0: the file was valid and solved, whatever the statuses. 1: the file was invalid; every problem is listed as `key.path: message`. 2: a file could not be read or written.
 
 The app writes a file back with every input exactly as it was read (`10` stays `10`, `10.0` stays `10.0`, `null` and `[]` stay), unless that input was edited in the app; only `results` is rewritten. An edited number is written as it was typed.
