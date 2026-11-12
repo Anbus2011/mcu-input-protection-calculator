@@ -54,7 +54,7 @@ Do both steps before any design work.
 
 ## Design basis
 
-- **Threshold basis.** When the MCU data sheet gives more than one pair of input thresholds for the pin, the design basis is the pair the data sheet guarantees by design for that pin: it goes in `vil_factor` and `vih_factor`. `mcu.note` says which pair was used, with its table and footnote, and how the data sheet qualifies each pair (tested in production, characterization, guaranteed by design). The other pair is solved as a what-if and shown in the report. With only one pair in the data sheet, use it and say so in `mcu.note`.
+- **Threshold basis.** When the MCU data sheet gives more than one pair of input thresholds for the pin, the design basis is the pair the data sheet guarantees by design for that pin: it goes in `vil_factor` and `vih_factor`. `mcu.note` says which pair was used, with its table and footnote, and how the data sheet qualifies each pair (tested in production, characterization, guaranteed by design). The other pair is solved as a what-if and shown in the report. When the data sheet gives more than one pair and none is guaranteed by design, stop and ask the user which pair is the design basis. With only one pair in the data sheet, use it and say so in `mcu.note`. When the data sheet gives a threshold as a formula with an offset from VDD, work out the voltage at the file's `vdd`, divide it by `vdd` to get the factor, and show that arithmetic in `mcu.note`.
 - **Leakage basis.** In a reverse table that describes leakage, the most-leaky column (`v_min`) is the data sheet's typical curve at the hot check temperature: this is the design basis. A worst case is a labeled what-if, never the design file: the data sheet's maximum at temperature when it gives one, otherwise the 25 C maximum scaled by the typical temperature rise (the typical curve's current hot over its current at 25 C, at the same voltage), with the arithmetic shown. `clamp_diode.note` says which basis each column uses.
 
 ## Quadrature encoder inputs
@@ -67,7 +67,12 @@ For an input whose role includes a quadrature encoder, the report has an Encoder
 - **Encoder frequency per channel** = the lower of f_reliable and f_gap. Say which one set it.
 - **Report:** the frequency per channel, pulses per second (the same number), counts per second (4 x frequency) and max RPM = 60 x frequency / lines per revolution.
 - **Max RPM** uses the encoder resolution from the requirements when one is given. Otherwise print a table of max RPM for 500, 1000, 1024, 2048, 2500, 4096 and 5000 lines per revolution.
-- **A specific source.** For a specific source (a known high and low level), solve a what-if copy with the input levels narrowed to that source (`v_logic_high_min` and `v_logic_low_max` set to its high and low levels) and report its encoder frequency, worked out the same way, next to the generic one. The copy is a what-if and is never written into the .div that is handed over.
+- **A specific source.** For a specific source (known high and low levels), solve a what-if copy with the input levels narrowed to that source and report its encoder frequency, worked out the same way, next to the generic one. The copy sets three levels:
+  - `v_logic_high_min` = the source's lowest high level (the slowest rise);
+  - `v_logic_low_max` = the source's highest low level (the slowest fall target);
+  - `v_input_max` = the source's highest high level (where the falling edge starts).
+
+  This copy is for frequency only: its power and highest-input checks describe the narrowed input, not the design, and are not reported. The copy is a what-if and is never written into the .div that is handed over.
 - **Scope.** State that this is the input network's limit only, not the encoder's own output limit or the cable's.
 
 ## Rules
@@ -126,7 +131,7 @@ One report per .div, in this order. Where a section has nothing, write "none".
       WHAT-IF: <the trial>; placeholders: <every placeholder value and what it stands in for>; <the result, as solve_div returned it>
       WHAT-IF other threshold pair: <the pair, its table and how the data sheet qualifies it>; <the result, as solve_div returned it>
       WHAT-IF worst-case leakage: <the data sheet's maximum at temperature, or the 25 C maximum scaled by the typical rise, with the arithmetic>; <the result, as solve_div returned it>
-      WHAT-IF source <its high and low levels>: <the result, as solve_div returned it>; encoder frequency per channel <the arithmetic, the result>
+      WHAT-IF source <name>, frequency only: v_logic_high_min <its lowest high>, v_logic_low_max <its highest low>, v_input_max <its highest high>; f_reliable, t_rise, t_fall <as solve_div returned them>; encoder frequency per channel <the arithmetic, the result>; its power and highest-input checks describe the narrowed input and are not reported
 
     Needs input
       <key>: <why it has no source>

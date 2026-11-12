@@ -184,7 +184,12 @@ class TestSkillMd:
          "`mcu.note` says which pair was used, with its table and footnote",
          "tested in production, characterization, guaranteed by design",
          "solved as a what-if and shown in the report",
-         "With only one pair in the data sheet, use it and say so"],
+         "more than one pair and none is guaranteed by design, stop and ask the user "
+         "which pair is the design basis",
+         "With only one pair in the data sheet, use it and say so",
+         "a threshold as a formula with an offset from VDD",
+         "work out the voltage at the file's `vdd`, divide it by `vdd` to get the factor",
+         "show that arithmetic in `mcu.note`"],
         ["**Leakage basis.**", "the most-leaky column (`v_min`)",
          "typical curve at the hot check temperature", "this is the design basis",
          "A worst case is a labeled what-if, never the design file",
@@ -222,6 +227,32 @@ class TestSkillMd:
                 "not the encoder's own output limit or the cable's",
                 "stop and say the server needs updating"]:
             assert phrase in section, phrase
+
+    def test_a_specific_source_sets_three_levels_for_frequency_only(self):
+        section = text_of(SKILL_MD).split(
+            "\n## Quadrature encoder inputs\n")[1].split("\n## ")[0]
+        source = section.split("- **A specific source.**")[1].split("\n- **")[0]
+        for phrase in [
+                "The copy sets three levels",
+                "`v_logic_high_min` = the source's lowest high level (the slowest rise)",
+                "`v_logic_low_max` = the source's highest low level "
+                "(the slowest fall target)",
+                "`v_input_max` = the source's highest high level "
+                "(where the falling edge starts)",
+                "This copy is for frequency only",
+                "its power and highest-input checks describe the narrowed input, "
+                "not the design, and are not reported",
+                "never written into the .div that is handed over"]:
+            assert phrase in source, phrase
+        template = text_of(SKILL_MD).split("\n## Report template\n")[1]
+        line = [l for l in template.split("\n") if "WHAT-IF source " in l]
+        assert len(line) == 1
+        for phrase in ["frequency only", "v_logic_high_min <its lowest high>",
+                       "v_logic_low_max <its highest low>",
+                       "v_input_max <its highest high>",
+                       "power and highest-input checks describe the narrowed input "
+                       "and are not reported"]:
+            assert phrase in line[0], phrase
 
     def test_the_summary_rows_the_encoder_section_reads_are_the_summarys(self):
         """f_reliable, t_rise and t_fall are rows of the summary solve_div
